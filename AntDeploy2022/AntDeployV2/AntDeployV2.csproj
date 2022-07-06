@@ -60,7 +60,6 @@
       <ResourceName>Menus.ctmenu</ResourceName>
     </VSCTCompile>
     <None Include="Key.snk" />
-    <None Include="LibGit2Sharp.dll.config" />
     <None Include="source.extension.vsixmanifest">
       <SubType>Designer</SubType>
     </None>
@@ -92,9 +91,6 @@
       <IncludeInVSIX>true</IncludeInVSIX>
     </Content>
     <Content Include="en\AntDeployWinform.resources.dll">
-      <IncludeInVSIX>true</IncludeInVSIX>
-    </Content>
-    <Content Include="jib.exe">
       <IncludeInVSIX>true</IncludeInVSIX>
     </Content>
     <Content Include="LibGit2Sharp.dll">
