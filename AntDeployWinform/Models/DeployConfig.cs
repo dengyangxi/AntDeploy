@@ -7,7 +7,7 @@ namespace AntDeployWinform.Models
         public string MsBuildPath { get; set; }
         //public string DeployFolderPath { get; set; }
         public bool IsChinease { get; set; }
-        public bool EnableEnvGroup { get; set; }
+        public bool EnableAntDeployJson { get; set; }
         public bool UseAsiaShanghai { get; set; }
         public bool SaveLogs { get; set; }
         public bool MultiInstance { get; set; }
@@ -53,7 +53,7 @@ namespace AntDeployWinform.Models
 
         public string GetNetCorePublishRuntimeArg()
         {
-            if (string.IsNullOrEmpty(NetCorePublishMode))
+            if (string.IsNullOrEmpty(NetCorePublishMode) || NetCorePublishMode == "Default")
             {
                 return string.Empty;
             }
@@ -85,6 +85,10 @@ namespace AntDeployWinform.Models
 
         public void RemoveEnv(int index)
         {
+            if (this.Env.Count <= index)
+            {
+                return;
+            }
             var env = this.Env[index];
             this.Env.RemoveAt(index);
             EnvChangeEvent?.Invoke(env, false,true);
@@ -232,6 +236,8 @@ namespace AntDeployWinform.Models
         public string AspNetCoreEnv { get; set; }
         public string LastEnvName { get; set; }
         public string RemoveDaysFromPublished { get; set; }
+
+        public string WorkDir { get; set; }
         public string Volume { get; set; }
         public string Other { get; set; }
 

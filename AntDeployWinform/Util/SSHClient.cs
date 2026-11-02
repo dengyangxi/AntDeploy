@@ -84,6 +84,17 @@ namespace AntDeployWinform.Util
             }
         }
 
+        public string WorkSpace
+        {
+            get
+            {
+                if (string.IsNullOrEmpty(this.WorkDir)) return "antdeploy";
+
+                return WorkDir;
+            }
+        }
+
+
         #region 镜像上传
         public bool DockerServiceEnableUpload { get; set; }
         public bool DockerServiceBuildImageOnly { get; set; }
@@ -104,6 +115,9 @@ namespace AntDeployWinform.Util
         public string ClientDateTimeFolderName { get; set; }
         public string ProjectDeployRoot { get; set; }
         public string RemoveDaysFromPublished { get; set; }
+
+        public string WorkDir { get; set; }
+        
         public string Remark { get; set; }
         public string Volume { get; set; }
         public string Other { get; set; }
@@ -306,10 +320,10 @@ namespace AntDeployWinform.Util
 
         public void ChangeToFolder(string changeTo)
         {
-            if (changeTo.StartsWith("/"))
-            {
-                changeTo = changeTo.Substring(1);
-            }
+            //if (changeTo.StartsWith("/"))
+            //{
+            //    changeTo = changeTo.Substring(1);
+            //}
             _sftpClient.ChangeDirectory(changeTo);
             _logger($"Changed directory to {changeTo}", NLog.LogLevel.Info);
         }
@@ -396,7 +410,7 @@ namespace AntDeployWinform.Util
         /// <param name="destinationFolder"></param>
         /// <param name="pageNumber">数量</param>
         /// <returns></returns>
-        public Tuple<string, List<Tuple<string, string>>> GetDeployHistory(string destinationFolder, int pageNumber = 0)
+        public Tuple<string, List<Tuple<string, string>>> GetDeployHistory( int pageNumber = 0)
         {
             var currentVersion = string.Empty;
             var dic = new Dictionary<string,Tuple<string,string,DateTime>>();
@@ -404,7 +418,7 @@ namespace AntDeployWinform.Util
             {
                 //获取当前版本是哪个
 
-
+                string destinationFolder = WorkSpace;
                 if (!destinationFolder.EndsWith("/")) destinationFolder = destinationFolder + "/";
 
                 destinationFolder = destinationFolder + PorjectName + "/";
@@ -476,7 +490,7 @@ namespace AntDeployWinform.Util
             return new Tuple<string, List<Tuple<string, string>>>(currentVersion, dic.Values.ToList().OrderByDescending(r => r.Item3).Select(r => new Tuple<string, string>(r.Item1, r.Item2)).ToList());
         }
 
-        public void PublishZip(Stream stream, string destinationFolder, string destinationfileName,Func<bool> continuetask = null,Dictionary<string,Tuple<string,bool>> chineseMapper = null)
+        public void PublishZip(Stream stream,  string destinationfileName,Func<bool> continuetask = null,Dictionary<string,Tuple<string,bool>> chineseMapper = null)
         {
             bool CheckCancel()
             {
@@ -491,6 +505,7 @@ namespace AntDeployWinform.Util
 
                 return false;
             }
+            string destinationFolder = WorkSpace;
 
             if (!destinationFolder.EndsWith("/")) destinationFolder = destinationFolder + "/";
             //按照项目分文件夹
@@ -500,7 +515,6 @@ namespace AntDeployWinform.Util
 
             //创建项目根目录
             var deploySaveFolder = projectPath + "deploy/";
-
             ProjectDeployRoot = deploySaveFolder;
             try
             {
@@ -512,14 +526,14 @@ namespace AntDeployWinform.Util
                         return;
                     }
                 }
-                CreateServerDirectoryIfItDoesntExist(deploySaveFolder);
+              
                 Upload(stream, destinationFolder, destinationfileName);
 
             }
-            catch (Exception)
+            catch (Exception e)
             {
                 if (CheckCancel()) return;
-
+                _logger(e.ToString(), NLog.LogLevel.Error);
                 throw;
             }
 
@@ -612,9 +626,13 @@ namespace AntDeployWinform.Util
         /// <param name="version">具体的日期文件夹路径</param>
         public void RollBack(string version)
         {
-            var path = "antdeploy/" + PorjectName + "/" + version + "/";
+            string destinationFolder = WorkSpace;
 
-            ProjectDeployRoot = "antdeploy/" + PorjectName + "/" + "deploy/";
+            if (!destinationFolder.EndsWith("/")) destinationFolder = destinationFolder + "/";
+
+            var path = destinationFolder + PorjectName + "/" + version + "/";
+
+            ProjectDeployRoot = destinationFolder + PorjectName + "/" + "deploy/";
 
             ChangeToFolder(path);
 
@@ -686,9 +704,14 @@ namespace AntDeployWinform.Util
             }
             else
             {
-                //如果项目中存在dockerFile 那么check 该DockerFile的Expose是否配置了 没有配置就报错
+                //如果项目中存在dockerFile 那么check 该DockerFile的Expose是否配置了 没有配置就读界面配置的，界面没有配置就用默认的
                 try
                 {
+                    if (!string.IsNullOrEmpty(Sudo))
+                    {
+                        // 针对非root权限的账号，需要用sudo的 先给DOCKERFILE设置个权限
+                        _sshClient.RunCommand($"{Sudo} chmod 777 \"{dockFilePath}\";");
+                    }
                     var dockerFileText = _sftpClient.ReadAllText(dockFilePath);
                     if (string.IsNullOrEmpty(dockerFileText))
                     {
@@ -862,6 +885,12 @@ namespace AntDeployWinform.Util
                                 add = true;
                                 allLines.Insert(entryPointIndex, "EXPOSE " + port);
                                 _logger($"Add EXPOSE " + port + $" to dockerFile  : 【{dockFilePath}】", NLog.LogLevel.Info);
+
+                                // 如果有自定义dockerfile且没有配置EXPOSE，除了加上EXPOSE以外还check下有没有配置urls
+                                if (!dockerFileText.Contains("ENV ASPNETCORE_URLS=") && dockerFileText.Contains("dotnet"))
+                                {
+                                    allLines.Insert(entryPointIndex, "ENV ASPNETCORE_URLS=http://*:" + port);
+                                }
                             }
 
                             if (!haveEnv && !string.IsNullOrEmpty(NetCoreEnvironment))
@@ -897,6 +926,7 @@ namespace AntDeployWinform.Util
                                     }
                                     writer.Flush();
                                 }
+                                _logger($"Update dockFile step1 【{dockFilePath}】", LogLevel.Info);
                             }
                         }
                     }
@@ -931,6 +961,7 @@ namespace AntDeployWinform.Util
                                 } 
                                 writer.Flush();
                             }
+                            _logger($"Update dockFile step2【{dockFilePath}】", LogLevel.Info);
                         }
                        
                     }
@@ -1149,18 +1180,24 @@ namespace AntDeployWinform.Util
                 var uploadImageName =$"{(string.IsNullOrEmpty(this.RepositoryUrl)?"": this.RepositoryUrl+"/")}{this.RepositoryNameSpace}/{uploadImage.ToLower()}:{uploadTag}";
                 _sshClient.RunCommand($"{Sudo} docker rmi {uploadImageName}");
                 string uploadCommand;
+                string uploadCommandLog;
                 if (string.IsNullOrEmpty(this.RepositoryUrl))
                 {
+                    uploadCommandLog =
+                        $"set -e;{Sudo} docker login -u {this.RepositoryUserName} -p {{PWD}}; {Sudo} docker tag {currentImageInfo.Item3} {uploadImageName};{Sudo} docker push {uploadImageName}";
+
                     uploadCommand =
                         $"set -e;{Sudo} docker login -u {this.RepositoryUserName} -p {this.RepositoryUserPwd}; {Sudo} docker tag {currentImageInfo.Item3} {uploadImageName};{Sudo} docker push {uploadImageName}";
                 }
                 else
                 {
+                    uploadCommandLog =
+                        $"set -e;{Sudo} docker login -u {this.RepositoryUserName} -p {{PWD}} {this.RepositoryUrl}; {Sudo} docker tag {currentImageInfo.Item3} {uploadImageName};{Sudo} docker push {uploadImageName}";
                     uploadCommand =
                         $"set -e;{Sudo} docker login -u {this.RepositoryUserName} -p {this.RepositoryUserPwd} {this.RepositoryUrl}; {Sudo} docker tag {currentImageInfo.Item3} {uploadImageName};{Sudo} docker push {uploadImageName}";
                 }
                 
-                _logger($"[upload image] - " + uploadCommand, LogLevel.Warn);
+                _logger($"[upload image] - " + uploadCommandLog, LogLevel.Warn);
                 var rr11 = _sshClient.CreateCommand(uploadCommand);
                 var result = rr11.BeginExecute();
                 using (var reader = new StreamReader(rr11.OutputStream, Encoding.UTF8, true, 1024, true))
@@ -1186,8 +1223,11 @@ namespace AntDeployWinform.Util
                 else
                 {
                     _logger($"[upload image] - Success", LogLevel.Info);
+                  
                 }
                 _sshClient.RunCommand($"{Sudo} docker rmi {uploadImageName}");
+                // 删除打包好的镜像
+                _sshClient.RunCommand($"{Sudo} docker rmi {currentImageInfo.Item3}");
             }
 
             try
@@ -1226,10 +1266,11 @@ namespace AntDeployWinform.Util
             {
                 return;
             }
-
+            var destinationFolder = WorkSpace;
+            if (!destinationFolder.EndsWith("/")) destinationFolder = destinationFolder + "/";
             _sftpClient.ChangeDirectory(RootFolder);
             var now = DateTime.Now.Date;
-            var histroryList = GetDeployHistoryWithOutRemark("antdeploy");
+            var histroryList = GetDeployHistoryWithOutRemark(destinationFolder);
             if (histroryList.Count <= 10) return;
             var oldFolderList = new List<OldFolder>();
             foreach (var histroy in histroryList)
@@ -1272,7 +1313,7 @@ namespace AntDeployWinform.Util
             {
                 try
                 {
-                    var toDelete = $"antdeploy/{PorjectName}/{target.Name}/";
+                    var toDelete = $"{destinationFolder}{PorjectName}/{target.Name}/";
                     this.DeleteDirectory(toDelete);
                     _logger($"Remove backup version success: {toDelete}", LogLevel.Info);
                 }
@@ -1576,16 +1617,25 @@ namespace AntDeployWinform.Util
         /// <param name="serverDestinationPath"></param>
         private void CreateServerDirectoryIfItDoesntExist(string serverDestinationPath)
         {
-            if (serverDestinationPath[0] == '/')
-                serverDestinationPath = serverDestinationPath.Substring(1);
-
-            string[] directories = serverDestinationPath.Split('/');
-            for (int i = 0; i < directories.Length; i++)
+            //if (serverDestinationPath[0] == '/')
+            //    serverDestinationPath = serverDestinationPath.Substring(1);
+            try
             {
-                string dirName = string.Join("/", directories, 0, i + 1);
-                if (!_sftpClient.Exists(dirName))
-                    _sftpClient.CreateDirectory(dirName);
+                string[] directories = serverDestinationPath.Split('/');
+                for (int i = 0; i < directories.Length; i++)
+                {
+                    string dirName = string.Join("/", directories, 0, i + 1);
+                    if (string.IsNullOrEmpty(dirName)) continue;
+                    if (!_sftpClient.Exists(dirName))
+                        _sftpClient.CreateDirectory(dirName);
+                }
             }
+            catch (Exception)
+            {
+                _logger("create folder fail:" + serverDestinationPath,LogLevel.Warn);
+                throw;
+            }
+           
         }
 
 

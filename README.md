@@ -1,6 +1,15 @@
 # AntDeploy
 Download url:
+
+vs2022的版本
+https://marketplace.visualstudio.com/items?itemName=nainaigu.AntDeploy2022
+
+vs2019请使用：
+https://marketplace.visualstudio.com/items?itemName=nainaigu.AntDeployVsix
+
+更老的：
 https://marketplace.visualstudio.com/items?itemName=nainaigu.AntDeploy
+
 
 # 功能
 * 支持docker一键部署(支持netcore)
@@ -10,6 +19,10 @@ https://marketplace.visualstudio.com/items?itemName=nainaigu.AntDeploy
 *  **(支持增量发布)(支持一键回滚)(支持点火)(支持选择特定文件发布)(支持查看发布记录)**
 * 支持脱离Visual Studio独立使用（跨平台支持windows系统和mac系统）
 * 支持Agent批量更新
+
+# 系列视频已全部录制完成
+
+https://www.bilibili.com/video/BV1sP411j7eK
 
 # (如要安装Windows服务器上agent服务)How to install 
 

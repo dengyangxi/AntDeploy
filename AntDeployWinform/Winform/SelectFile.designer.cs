@@ -1,4 +1,6 @@
-﻿namespace AntDeployWinform.Winform
+﻿using AntDeployWinform.Models;
+
+namespace AntDeployWinform.Winform
 {
     partial class SelectFile
     {
@@ -28,11 +30,10 @@
         /// </summary>
         private void InitializeComponent()
         {
-            this.components = new System.ComponentModel.Container();
             System.ComponentModel.ComponentResourceManager resources = new System.ComponentModel.ComponentResourceManager(typeof(SelectFile));
             this.progressBar1 = new System.Windows.Forms.ProgressBar();
             this.folderBrowserDialog1 = new System.Windows.Forms.FolderBrowserDialog();
-            this.treeView1 = new TriStateTreeView.TriStateTreeViewCtrl();
+            this.treeView1 = new AntDeployWinform.Models.ExTreeView();
             this.SuspendLayout();
             // 
             // progressBar1
@@ -45,6 +46,7 @@
             this.treeView1.CheckBoxes = true;
             resources.ApplyResources(this.treeView1, "treeView1");
             this.treeView1.Name = "treeView1";
+            this.treeView1.AfterCheck += new System.Windows.Forms.TreeViewEventHandler(this.treeView1_AfterCheck);
             // 
             // SelectFile
             // 
@@ -57,6 +59,7 @@
             this.MinimizeBox = false;
             this.Name = "SelectFile";
             this.FormClosing += new System.Windows.Forms.FormClosingEventHandler(this.SelectFile_FormClosing);
+            this.Shown += new System.EventHandler(this.SelectFile_Shown);
             this.ResumeLayout(false);
 
         }
@@ -64,7 +67,7 @@
         #endregion
         private System.Windows.Forms.ProgressBar progressBar1;
         private System.Windows.Forms.FolderBrowserDialog folderBrowserDialog1;
-        private TriStateTreeView.TriStateTreeViewCtrl treeView1;
+        private ExTreeView treeView1;
     }
 }
 

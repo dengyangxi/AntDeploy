@@ -108,7 +108,7 @@ namespace AntDeployAgentWindows.MyApp.Service
             if (projectRootPath == null || !projectRootPath.Exists) return re;
             //每次发布完成后清理老的发布历史记录 只清理自己项目的 
             //防止别的项目正在回滚到某个版本，你这边发现这个版本已经过时了就删除了
-            Setting.ClearOldFolders(ProviderName.Equals("iis") || ProjectName.Equals("linux"), projectRootPath.Name, Log);
+            Setting.ClearOldFolders(ProviderName , projectRootPath.Name, Log);
             return re;
         }
 
@@ -152,7 +152,7 @@ namespace AntDeployAgentWindows.MyApp.Service
             return CheckData(formHandler);
         }
 
-        protected string findUploadFolder(string _projectPublishFolder,bool isPublish = false)
+        protected string findUploadFolder(string _projectPublishFolder, bool isPublish = false, bool docker = false)
         {
 
             var deployFolder = Path.Combine(_projectPublishFolder, "publish");
@@ -174,7 +174,7 @@ namespace AntDeployAgentWindows.MyApp.Service
                 if (!File.Exists(zipFile)) return deployFolder;
 
                 //解压
-                ZipFile.ExtractToDirectory(zipFile, _projectPublishFolder);
+                ZipFile.ExtractToDirectory(zipFile, docker?Path.Combine(_projectPublishFolder,"publish"):_projectPublishFolder);
                 temp = new DirectoryInfo(_projectPublishFolder);
                 tempFolderList = temp.GetDirectories();
                 if (tempFolderList.Length == 1)
