@@ -1,0 +1,68 @@
+@using System.Collections.Generic
+@using AntDeploy.Core.Models
+
+<div class="envpair-editor">
+    @if (Value != null)
+    {
+        @for (int i = 0; i < Value.Count; i++)
+        {
+            var idx = i;
+            var p = Value[idx];
+            <div class="envpair-card">
+                <div class="form-grid">
+                    <div class="form-item">
+                        <div class="form-label">环境名 EnvName</div>
+                        <Input @bind-Value="p.EnvName" Placeholder="与部署环境名一致" Style="width:200px;" />
+                    </div>
+                    <div class="form-item">
+                        <div class="form-label">配置文件名 ConfigName</div>
+                        <Input @bind-Value="p.ConfigName" Placeholder="如 appsettings.prod.json" Style="width:260px;" />
+                    </div>
+                    @if (Type == "linux")
+                    {
+                        <div class="form-item">
+                            <div class="form-label">Linux 环境参数 EnvParam</div>
+                            <Input @bind-Value="p.LinuxEnvParam" Placeholder="--environment=prod" Style="width:260px;" />
+                        </div>
+                    }
+                    @if (Type == "docker")
+                    {
+                        <div class="form-item">
+                            <div class="form-label">端口 Port</div>
+                            <Input @bind-Value="p.DockerPort" Placeholder="8080:80" Style="width:160px;" />
+                        </div>
+                        <div class="form-item">
+                            <div class="form-label">挂载卷 Volume</div>
+                            <Input @bind-Value="p.DockerVolume" Style="width:260px;" />
+                        </div>
+                        <div class="form-item">
+                            <div class="form-label">其他参数 Other</div>
+                            <Input @bind-Value="p.DockerOther" Style="width:260px;" />
+                        </div>
+                    }
+                </div>
+                <Button Danger="true" Size="ButtonSize.Small" OnClick="@(() => RemoveAt(idx))">移除此配置对</Button>
+            </div>
+        }
+    }
+    <Button Size="ButtonSize.Small" OnClick="Add" Style="margin-top:6px;">+ 添加环境配置对</Button>
+</div>
+
+@code {
+    [Parameter] public List<EnvPairConfig> Value { get; set; } = new();
+    [Parameter] public string Type { get; set; } = "iis";
+    [Parameter] public EventCallback Changed { get; set; }
+
+    private void Add()
+    {
+        Value ??= new List<EnvPairConfig>();
+        Value.Add(new EnvPairConfig());
+        _ = Changed.InvokeAsync();
+    }
+
+    private void RemoveAt(int i)
+    {
+        if (Value != null && i >= 0 && i < Value.Count) Value.RemoveAt(i);
+        _ = Changed.InvokeAsync();
+    }
+}

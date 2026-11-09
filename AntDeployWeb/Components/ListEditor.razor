@@ -1,0 +1,37 @@
+@using System.Collections.Generic
+
+<div class="list-editor">
+    @if (Value != null)
+    {
+        @for (int i = 0; i < Value.Count; i++)
+        {
+            var idx = i;
+            <div class="server-row">
+                <Input @bind-Value="Value[idx]" Placeholder="@Placeholder" Style="width:420px;" />
+                <Button Danger="true" Size="ButtonSize.Small" OnClick="@(() => RemoveAt(idx))">移除</Button>
+            </div>
+        }
+    }
+    <Button Size="ButtonSize.Small" OnClick="Add" Style="margin-top:6px;">+ @AddText</Button>
+</div>
+
+@code {
+    /// <summary>被编辑的字符串列表（直接原地修改绑定对象）</summary>
+    [Parameter] public List<string> Value { get; set; } = new();
+    [Parameter] public string Placeholder { get; set; } = string.Empty;
+    [Parameter] public string AddText { get; set; } = "添加";
+    [Parameter] public EventCallback Changed { get; set; }
+
+    private void Add()
+    {
+        Value ??= new List<string>();
+        Value.Add(string.Empty);
+        _ = Changed.InvokeAsync();
+    }
+
+    private void RemoveAt(int i)
+    {
+        if (Value != null && i >= 0 && i < Value.Count) Value.RemoveAt(i);
+        _ = Changed.InvokeAsync();
+    }
+}

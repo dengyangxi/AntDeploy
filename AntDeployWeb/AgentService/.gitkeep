@@ -1,0 +1,2 @@
+# 占位文件：保证 AgentService 目录纳入 Git（自包含发布产物 Windows/ Linux/ 已忽略）。
+# 运行 AntDeployWeb/publish-agents.ps1 生成 Windows/ 与 Linux/ 子目录下的 Agent 发布包。

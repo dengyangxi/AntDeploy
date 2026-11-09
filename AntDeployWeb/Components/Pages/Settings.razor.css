@@ -1,0 +1,20 @@
+/* Settings page layout (base .setting-* styling lives in global app.css) */
+
+.settings-wrap {
+    max-width: 900px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.setting-row--switch {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+}
+
+    .setting-row--switch .setting-label {
+        margin-bottom: 0;
+    }

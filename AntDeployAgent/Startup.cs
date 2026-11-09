@@ -28,7 +28,24 @@ namespace AntDeployAgentWindows
             var builder = new AppBuilder();
             Configuration(builder);
             _owinAppFunc = Microsoft.Owin.Builder.AppBuilderExtensions.Build(builder);
-            var deployDir = System.Configuration.ConfigurationManager.AppSettings["DeployDir"];
+            ApplyDeployDir();
+            // DeployDir 热变更时重建发布根目录；其余配置由 AgentConfigLoader 动态读取，无需在此处理。
+            AgentConfigLoader.Changed += OnConfigChanged;
+        }
+
+        /// <summary>DeployDir 变更回调：仅当目录实际变化时重建发布根目录。</summary>
+        private static void OnConfigChanged(AgentConfig oldCfg, AgentConfig newCfg)
+        {
+            var oldDir = oldCfg == null ? string.Empty : (oldCfg.DeployDir ?? string.Empty);
+            var newDir = newCfg == null ? string.Empty : (newCfg.DeployDir ?? string.Empty);
+            if (string.Equals(oldDir, newDir, StringComparison.OrdinalIgnoreCase)) return;
+            ApplyDeployDir();
+        }
+
+        /// <summary>依据当前配置的 DeployDir 初始化发布根目录（空=程序所在目录）。</summary>
+        private static void ApplyDeployDir()
+        {
+            var deployDir = AgentConfigLoader.Current.DeployDir;
             if (!string.IsNullOrEmpty(deployDir))
             {
                 Setting.InitWebRoot(deployDir, true);
@@ -40,9 +57,7 @@ namespace AntDeployAgentWindows
 #else
                 Setting.InitWebRoot(AppDomain.CurrentDomain.BaseDirectory);
 #endif
-
             }
-
         }
 
 
@@ -103,6 +118,7 @@ namespace AntDeployAgentWindows
 
         public void Stop()
         {
+            AgentConfigLoader.Changed -= OnConfigChanged;
             Setting.StopWatchFolderTask();
         }
     }

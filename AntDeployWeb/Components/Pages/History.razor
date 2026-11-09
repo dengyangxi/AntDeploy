@@ -1,0 +1,182 @@
+@page "/history"
+@attribute [Authorize]
+@inject DeploySessionManager SessionManager
+@inject CurrentUserService CurrentUser
+@inject Microsoft.Extensions.Options.IOptions<AntDeployWeb.Data.StorageOptions> StorageOpts
+@inject NavigationManager Nav
+@inject MessageService Message
+
+<div class="page-head">
+    <div class="page-head__titles">
+        <div class="page-head__title"><Icon Type="history" />发布历史</div>
+        <div class="page-head__sub">查看最近 @_maxRecords 次发布记录（超出自动清理）</div>
+    </div>
+    <div class="page-head__actions">
+        <Button Icon="reload" OnClick="LoadHistory">刷新</Button>
+    </div>
+</div>
+
+<div class="panel">
+    <div class="panel__head">
+        <span class="panel__title"><Icon Type="unordered-list" />历史记录</span>
+        <span class="chip"><span class="chip__k">共</span><span class="chip__v">@_history.Count</span></span>
+    </div>
+    <div class="panel__body" style="padding:0;">
+        <Table TItem="DeploySession"
+               DataSource="_history"
+               Size="TableSize.Middle"
+               ScrollX="1400">
+            <ChildContent>
+                <Column Title="项目名称" @bind-Field="@context.ProfileName" Width="180" />
+                <Column Title="环境" @bind-Field="@context.EnvName" Width="100" />
+                <Column Title="类型" @bind-Field="@context.DeployType" Width="100" />
+                <Column Title="分支" @bind-Field="@context.Branch" Width="140" />
+                <Column Title="状态" TData="string" Width="100">
+                    <Template>
+                        <Tag Color="@context.StatusColor">@context.StatusText</Tag>
+                    </Template>
+                </Column>
+                <Column Title="开始时间" TData="string" Width="160">
+                    <Template>@context.StartTime.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss")</Template>
+                </Column>
+                <Column Title="耗时" TData="string" Width="100">
+                    <Template>@FormatDuration(context)</Template>
+                </Column>
+                <Column Title="结果" TData="string" Width="200">
+                    <Template>
+                        @if (context.SuccessCount > 0 || context.FailCount > 0)
+                        {
+                            <span>成功 @context.SuccessCount 台，失败 @context.FailCount 台</span>
+                        }
+                        else
+                        {
+                            <span>@context.Message</span>
+                        }
+                    </Template>
+                </Column>
+                <ActionColumn Title="操作" Width="160">
+                    <Space>
+                        <SpaceItem>
+                            <Button Size="ButtonSize.Small" OnClick="@(() => ViewDetail(context))">查看日志</Button>
+                        </SpaceItem>
+                        @if (CurrentUser.CanDeleteProject(context.ProfileId))
+                        {
+                            <SpaceItem>
+                                <Popconfirm Title="确认删除此记录" OnConfirm="@(() => DeleteRecord(context))">
+                                    <Button Size="ButtonSize.Small" Danger="true">删除</Button>
+                                </Popconfirm>
+                            </SpaceItem>
+                        }
+                    </Space>
+                </ActionColumn>
+            </ChildContent>
+        </Table>
+    </div>
+</div>
+
+<Modal Title="@("发布日志详情")"
+       @bind-Visible="_detailVisible"
+       OnCancel="@(() => _detailVisible = false)"
+       Footer="null"
+       Width="900">
+    @if (_detailSession != null)
+    {
+        <div style="margin-bottom:12px;">
+            <div class="chip"><span class="chip__k">项目</span><span class="chip__v">@_detailSession.ProfileName</span></div>
+            <div class="chip"><span class="chip__k">环境</span><span class="chip__v">@_detailSession.EnvName</span></div>
+            <div class="chip"><span class="chip__k">类型</span><span class="chip__v">@_detailSession.DeployType</span></div>
+            <div class="chip"><span class="chip__k">分支</span><span class="chip__v">@_detailSession.Branch</span></div>
+            <div class="chip chip--brand"><span class="chip__k">状态</span><span class="chip__v">@_detailSession.StatusText</span></div>
+        </div>
+        @if (!string.IsNullOrEmpty(_detailSession.Message))
+        {
+            <Alert Type="@(_detailSession.IsSuccess ? AlertType.Success : AlertType.Error)" 
+                   Message="@_detailSession.Message" 
+                   ShowIcon="true" 
+                   Style="margin-bottom:12px;" />
+        }
+        <div class="console" style="max-height:500px;">
+            <div class="console__bar">
+                <span class="console__label">
+                    <span class="console__dot"></span>
+                    发布日志 · @_detailSession.Logs.Count 条
+                </span>
+            </div>
+            <div class="deploy-log">
+                @foreach (var line in _detailSession.Logs)
+                {
+                    <div class="@line.Css">
+                        <span class="log-time">@line.Time</span>
+                        <span class="log-text">@line.Text</span>
+                    </div>
+                }
+            </div>
+        </div>
+        @if (_detailSession.HostResults.Count > 0)
+        {
+            <Divider>服务器结果</Divider>
+            <div style="max-height:200px;overflow-y:auto;">
+                @foreach (var h in _detailSession.HostResults)
+                {
+                    <div style="padding:4px 0;border-bottom:1px solid #f0f0f0;">
+                        <Tag Color="@(h.Success ? "green" : "red")">@(h.Success ? "成功" : "失败")</Tag>
+                        <span style="margin-left:8px;">@h.Display</span>
+                        @if (!string.IsNullOrEmpty(h.Msg))
+                        {
+                            <span style="margin-left:8px;color:#999;">@h.Msg</span>
+                        }
+                    </div>
+                }
+            </div>
+        }
+    }
+</Modal>
+
+@code {
+    private List<DeploySession> _history = new();
+    private int _maxRecords = 100;
+    private bool _detailVisible;
+    private DeploySession _detailSession;
+
+    [SupplyParameterFromQuery] public string Profile { get; set; } = string.Empty;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await CurrentUser.LoadAsync();
+        var max = StorageOpts.Value.HistoryMaxRecords;
+        _maxRecords = max > 0 ? max : 100;
+        LoadHistory();
+    }
+
+    private void LoadHistory()
+    {
+        var profileId = string.IsNullOrWhiteSpace(Profile) ? null : Profile;
+        var all = SessionManager.GetHistory(_maxRecords, profileId);
+        // 按可见团队过滤（超管全部；未分配团队的项目仅超管可见）
+        _history = all.Where(s => CurrentUser.CanAccessProject(s.ProfileId)).ToList();
+    }
+
+    private static string FormatDuration(DeploySession s)
+    {
+        if (s.EndTime == null) return "-";
+        var duration = s.EndTime.Value - s.StartTime;
+        if (duration.TotalSeconds < 60) return $"{(int)duration.TotalSeconds}秒";
+        if (duration.TotalMinutes < 60) return $"{(int)duration.TotalMinutes}分{(int)duration.Seconds}秒";
+        return $"{(int)duration.TotalHours}时{(int)duration.Minutes}分";
+    }
+
+    private void ViewDetail(DeploySession session)
+    {
+        // 从数据库加载完整日志
+        _detailSession = SessionManager.GetHistoryDetail(session.Id) ?? session;
+        _detailVisible = true;
+    }
+
+    private void DeleteRecord(DeploySession session)
+    {
+        if (!CurrentUser.CanDeleteProject(session.ProfileId)) { Message.Warning("无权删除该记录"); return; }
+        SessionManager.DeleteHistory(session.Id);
+        _history.Remove(session);
+        Message.Success("已删除");
+    }
+}

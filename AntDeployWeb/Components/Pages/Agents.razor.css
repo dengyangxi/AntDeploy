@@ -1,0 +1,81 @@
+/* Agents.razor 作用域样式：手册排版 + 服务器列表辅助 */
+.manual {
+    font-size: 13px;
+    color: var(--ink-600);
+    line-height: 1.75;
+}
+
+    .manual h4 {
+        font-size: 14px;
+        font-weight: 700;
+        color: var(--ink-800);
+        margin: 18px 0 8px;
+    }
+
+        .manual h4:first-child {
+            margin-top: 0;
+        }
+
+    .manual p {
+        margin: 6px 0;
+    }
+
+    .manual ol,
+    .manual ul {
+        margin: 6px 0 12px;
+        padding-left: 22px;
+    }
+
+    .manual li {
+        margin-bottom: 6px;
+    }
+
+    .manual pre {
+        background: #0f172a;
+        color: #e2e8f0;
+        border-radius: 8px;
+        padding: 10px 12px;
+        margin: 6px 0 12px;
+        overflow-x: auto;
+        font-family: var(--font-mono);
+        font-size: 12.5px;
+        line-height: 1.6;
+        white-space: pre;
+    }
+
+    .manual code {
+        font-family: var(--font-mono);
+        background: var(--ink-050);
+        padding: 1px 5px;
+        border-radius: 4px;
+        color: var(--ink-700);
+    }
+
+    .manual .note {
+        background: #fff7ed;
+        border: 1px solid #fed7aa;
+        color: #9a3412;
+        border-radius: 8px;
+        padding: 8px 12px;
+        margin: 10px 0;
+    }
+
+    .manual .ok {
+        background: #ecfdf5;
+        border: 1px solid #a7f3d0;
+        color: #065f46;
+        border-radius: 8px;
+        padding: 8px 12px;
+        margin: 10px 0;
+    }
+
+.srv-host {
+    font-family: var(--font-mono);
+    font-weight: 600;
+    color: var(--ink-800);
+}
+
+.srv-meta {
+    color: var(--ink-400);
+    font-size: 12px;
+}

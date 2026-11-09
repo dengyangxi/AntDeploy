@@ -29,6 +29,7 @@ namespace AntDeployAgentWindows.WebApiCore
             if (path == "/rollback" || path.StartsWith("/rollback/")) return new RollbackService();
             if (path == "/version" || path.StartsWith("/version/")) return new VersionService();
             if (path == "/logger" || path.StartsWith("/logger/")) return new LoggerService();
+            if (path == "/config" || path.StartsWith("/config/")) return new ConfigService();
 
 
             return null;

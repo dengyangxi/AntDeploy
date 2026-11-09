@@ -1,0 +1,1593 @@
+/* ============================================================
+   AntDeploy · Design System
+   Aesthetic direction: "Refined Control Room"
+   - Engineered, calm, precise; built for long deploy sessions.
+   - Palette: graphite / ink neutrals + a cyan-teal "signal" accent
+     (deliberately not the stock AntDesign blue, not purple/indigo).
+   - Type: IBM Plex Sans (UI) · IBM Plex Mono (console & data).
+   All colors / spacing / elevation are driven by tokens below so
+   AntDesign components and custom markup stay visually cohesive.
+   ============================================================ */
+
+:root {
+    /* Brand — cyan/teal signal */
+    --brand-50: #ecfeff;
+    --brand-100: #cffafe;
+    --brand-200: #a5f3fc;
+    --brand-300: #67e8f9;
+    --brand-400: #22d3ee;
+    --brand-500: #06b6d4;
+    --brand-600: #0891b2;
+    --brand-700: #0e7490;
+    --brand-800: #155e75;
+    --brand: var(--brand-600);
+    --brand-hover: var(--brand-500);
+    --brand-active: var(--brand-700);
+    --brand-soft: rgba(8, 145, 178, 0.10);
+    --brand-soft-2: rgba(8, 145, 178, 0.16);
+    --brand-ring: rgba(8, 145, 178, 0.28);
+    --brand-grad: linear-gradient(135deg, #06b6d4 0%, #0891b2 55%, #0e7490 100%);
+
+    /* Override antd's click-ripple color (default #1890ff) so button waves
+       match the brand. :root outranks antd's `html{}` element selector. */
+    --antd-wave-shadow-color: #0891b2;
+
+    /* Semantic */
+    --ok: #16a34a;
+    --ok-soft: rgba(22, 163, 74, 0.12);
+    --warn: #d97706;
+    --warn-soft: rgba(217, 119, 6, 0.12);
+    --err: #dc2626;
+    --err-soft: rgba(220, 38, 38, 0.12);
+
+    /* Ink / neutrals (slate) */
+    --ink-900: #0b1220;
+    --ink-850: #0f1729;
+    --ink-800: #131f36;
+    --ink-700: #1e293b;
+    --ink-600: #334155;
+    --ink-500: #475569;
+    --ink-400: #64748b;
+    --ink-300: #94a3b8;
+    --ink-200: #cbd5e1;
+    --ink-100: #e2e8f0;
+    --ink-050: #f1f5f9;
+
+    --bg-app: #eaeef3;
+    --bg-card: #ffffff;
+    --border: #e4e9f0;
+    --border-strong: #cfd8e3;
+
+    /* Elevation */
+    --sh-1: 0 1px 2px rgba(15, 23, 42, .06), 0 1px 3px rgba(15, 23, 42, .08);
+    --sh-2: 0 6px 16px rgba(15, 23, 42, .08), 0 2px 6px rgba(15, 23, 42, .04);
+    --sh-3: 0 18px 44px rgba(15, 23, 42, .14), 0 6px 14px rgba(15, 23, 42, .06);
+
+    /* Radius */
+    --r-sm: 8px;
+    --r-md: 12px;
+    --r-lg: 16px;
+    --r-pill: 999px;
+
+    /* Type */
+    --font-ui: "IBM Plex Sans", "Segoe UI", "Microsoft YaHei", "PingFang SC", -apple-system, BlinkMacSystemFont, sans-serif;
+    --font-mono: "IBM Plex Mono", "Cascadia Code", "JetBrains Mono", Consolas, "Courier New", monospace;
+}
+
+/* ---------- Base ---------- */
+html, body {
+    font-family: var(--font-ui);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+}
+
+body {
+    background: var(--bg-app);
+    color: var(--ink-700);
+}
+
+::selection {
+    background: var(--brand-200);
+    color: var(--ink-900);
+}
+
+a {
+    color: var(--brand-600);
+    transition: color .18s ease;
+}
+
+    a:hover {
+        color: var(--brand-500);
+    }
+
+/* Accessible focus ring everywhere */
+:focus-visible {
+    outline: 2px solid var(--brand-ring);
+    outline-offset: 2px;
+}
+
+/* Thin, themed scrollbars */
+* {
+    scrollbar-width: thin;
+    scrollbar-color: var(--ink-200) transparent;
+}
+
+::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+}
+
+::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+    background: var(--ink-200);
+    border-radius: var(--r-pill);
+    border: 2px solid transparent;
+    background-clip: content-box;
+}
+
+    ::-webkit-scrollbar-thumb:hover {
+        background: var(--ink-300);
+        background-clip: content-box;
+    }
+
+/* Blazor validation + error UI (kept) */
+h1:focus {
+    outline: none;
+}
+
+.valid.modified:not([type=checkbox]) {
+    outline: 1px solid var(--ok);
+}
+
+.invalid {
+    outline: 1px solid var(--err);
+}
+
+.validation-message {
+    color: var(--err);
+}
+
+#blazor-error-ui {
+    background: #fff8e1;
+    bottom: 0;
+    box-shadow: 0 -2px 12px rgba(15, 23, 42, .18);
+    display: none;
+    left: 0;
+    padding: .7rem 1.25rem .8rem 1.25rem;
+    position: fixed;
+    width: 100%;
+    z-index: 1000;
+    color: var(--ink-700);
+    border-top: 2px solid var(--warn);
+}
+
+    #blazor-error-ui .dismiss {
+        cursor: pointer;
+        position: absolute;
+        right: .75rem;
+        top: .5rem;
+    }
+
+.blazor-error-boundary {
+    background: var(--err);
+    padding: 1rem 1rem 1rem 3.7rem;
+    color: #fff;
+}
+
+    .blazor-error-boundary::after {
+        content: "发生错误。"
+    }
+
+/* ============================================================
+   AntDesign component overrides — retint to the brand system
+   ============================================================ */
+
+/* Buttons */
+.ant-btn {
+    border-radius: var(--r-sm);
+    font-weight: 500;
+    font-family: var(--font-ui);
+    box-shadow: none;
+    transition: transform .16s cubic-bezier(.2,.7,.3,1), box-shadow .18s ease, background-color .18s ease, border-color .18s ease, color .18s ease;
+}
+
+    .ant-btn:not(.ant-btn-link):not(.ant-btn-text):hover {
+        transform: translateY(-1px);
+    }
+
+.ant-btn-primary {
+    background: var(--brand-grad);
+    border-color: var(--brand-600);
+    color: #fff;
+    box-shadow: 0 2px 8px rgba(8, 145, 178, .28);
+}
+
+    .ant-btn-primary:hover, .ant-btn-primary:focus {
+        background: linear-gradient(135deg, #22d3ee 0%, #06b6d4 55%, #0891b2 100%);
+        border-color: var(--brand-500);
+        color: #fff;
+        box-shadow: 0 6px 18px rgba(8, 145, 178, .34);
+    }
+
+    .ant-btn-primary:active {
+        background: var(--brand-700);
+        border-color: var(--brand-700);
+        transform: translateY(0);
+        box-shadow: 0 2px 6px rgba(8, 145, 178, .28);
+    }
+
+    .ant-btn-primary[disabled], .ant-btn-primary[disabled]:hover {
+        background: var(--ink-100);
+        border-color: var(--border);
+        color: var(--ink-300);
+        box-shadow: none;
+        transform: none;
+    }
+
+.ant-btn-default:hover, .ant-btn-default:focus {
+    color: var(--brand-600);
+    border-color: var(--brand-400);
+}
+
+.ant-btn-dangerous.ant-btn-primary {
+    background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+    border-color: var(--err);
+    box-shadow: 0 2px 8px rgba(220, 38, 38, .26);
+}
+
+    .ant-btn-dangerous.ant-btn-primary:hover, .ant-btn-dangerous.ant-btn-primary:focus {
+        background: linear-gradient(135deg, #f87171 0%, #ef4444 100%);
+        border-color: #ef4444;
+        box-shadow: 0 6px 18px rgba(220, 38, 38, .32);
+    }
+
+.ant-btn-dangerous:not(.ant-btn-primary):hover, .ant-btn-dangerous:not(.ant-btn-primary):focus {
+    color: var(--err);
+    border-color: #fca5a5;
+}
+
+/* Links inside buttons */
+.ant-btn-link {
+    color: var(--brand-600);
+}
+
+    .ant-btn-link:hover {
+        color: var(--brand-500);
+    }
+
+/* Menu (dark sider) — antd uses .ant-menu.ant-menu-dark and
+   .ant-menu-dark.ant-menu-dark:not(.ant-menu-horizontal) .ant-menu-item-selected
+   which outrank plain .ant-menu-dark; mirror that specificity + !important
+   so the graphite sider and cyan selected state actually win. */
+.ant-menu-dark,
+.ant-menu-dark.ant-menu-dark,
+.ant-menu-dark .ant-menu-sub {
+    background: transparent !important;
+    color: var(--ink-200);
+}
+
+    .ant-menu-dark .ant-menu-item {
+        border-radius: var(--r-sm);
+        margin: 4px 10px;
+        width: auto;
+        color: var(--ink-200);
+        transition: background-color .2s ease, color .2s ease;
+    }
+
+        .ant-menu-dark .ant-menu-item:hover {
+            color: #fff;
+            background: rgba(255, 255, 255, .06);
+        }
+
+        .ant-menu-dark .ant-menu-item a {
+            color: inherit;
+        }
+
+    .ant-menu-dark.ant-menu-dark:not(.ant-menu-horizontal) .ant-menu-item-selected,
+    .ant-menu-dark.ant-menu-dark:not(.ant-menu-horizontal) .ant-menu-item-selected:hover,
+    .ant-menu-dark .ant-menu-item-selected,
+    .ant-menu-dark .ant-menu-item-selected:hover {
+        background: var(--brand-soft-2) !important;
+        color: #fff !important;
+        box-shadow: inset 3px 0 0 var(--brand-400);
+    }
+
+        .ant-menu-dark.ant-menu-dark:not(.ant-menu-horizontal) .ant-menu-item-selected .anticon,
+        .ant-menu-dark .ant-menu-item-selected .anticon {
+            color: var(--brand-300);
+        }
+
+/* Tabs */
+.ant-tabs-tab {
+    font-weight: 500;
+    transition: color .18s ease;
+}
+
+    .ant-tabs-tab:hover {
+        color: var(--brand-500);
+    }
+
+.ant-tabs-tab.ant-tabs-tab-active .ant-tabs-tab-btn {
+    color: var(--brand-600);
+    font-weight: 600;
+}
+
+.ant-tabs-top > .ant-tabs-nav .ant-tabs-ink-bar,
+.ant-tabs-bottom > .ant-tabs-nav .ant-tabs-ink-bar,
+.ant-tabs-ink-bar {
+    background: var(--brand-grad);
+    height: 3px !important;
+    border-radius: var(--r-pill);
+}
+
+.ant-tabs-nav::before {
+    border-bottom-color: var(--border);
+}
+
+/* Switch */
+.ant-switch-checked {
+    background: var(--brand-600) !important;
+}
+
+    .ant-switch-checked:hover:not(.ant-switch-disabled) {
+        background: var(--brand-500) !important;
+    }
+
+/* Checkbox & Radio */
+.ant-checkbox-checked .ant-checkbox-inner,
+.ant-checkbox-indeterminate .ant-checkbox-inner {
+    background-color: var(--brand-600) !important;
+    border-color: var(--brand-600) !important;
+}
+
+.ant-checkbox-indeterminate .ant-checkbox-inner::after {
+    background-color: var(--brand-600) !important;
+}
+
+.ant-checkbox-wrapper:hover .ant-checkbox-inner,
+.ant-checkbox:hover .ant-checkbox-inner,
+.ant-checkbox-input:focus + .ant-checkbox-inner {
+    border-color: var(--brand-500) !important;
+}
+
+.ant-radio-checked .ant-radio-inner {
+    border-color: var(--brand-600) !important;
+}
+
+    .ant-radio-checked .ant-radio-inner::after {
+        background-color: var(--brand-600) !important;
+    }
+
+.ant-radio-wrapper:hover .ant-radio-inner,
+.ant-radio-inner:focus {
+    border-color: var(--brand-500) !important;
+}
+
+/* Inputs / Selectors */
+.ant-input,
+.ant-input-affix-wrapper,
+.ant-input-number,
+.ant-picker,
+.ant-select-selector {
+    border-radius: var(--r-sm) !important;
+    font-family: var(--font-ui);
+}
+
+    .ant-input:hover,
+    .ant-input-affix-wrapper:hover,
+    .ant-select:not(.ant-select-disabled):hover .ant-select-selector {
+        border-color: var(--brand-400);
+    }
+
+.ant-input:focus,
+.ant-input-focused,
+.ant-input-affix-wrapper:focus,
+.ant-input-affix-wrapper-focused,
+.ant-select-focused:not(.ant-select-disabled) .ant-select-selector {
+    border-color: var(--brand-500) !important;
+    box-shadow: 0 0 0 3px var(--brand-soft) !important;
+}
+
+/* Table */
+.ant-table {
+    font-family: var(--font-ui);
+}
+
+.ant-table-thead > tr > th {
+    background: var(--ink-050);
+    color: var(--ink-600);
+    font-weight: 600;
+    border-bottom: 1px solid var(--border);
+}
+
+.ant-table-tbody > tr > td {
+    border-bottom: 1px solid var(--border);
+}
+
+.ant-table-tbody > tr:hover > td,
+.ant-table-tbody > tr.ant-table-row-hover > td,
+.ant-table-cell-row-hover {
+    background: var(--brand-soft) !important;
+}
+
+.ant-table-container,
+.ant-table-content,
+.ant-table-cell {
+    border-color: var(--border) !important;
+}
+
+/* Card / Modal / Alert / Popover */
+.ant-card {
+    border-radius: var(--r-md);
+    border-color: var(--border);
+    box-shadow: var(--sh-1);
+}
+
+.ant-modal-content {
+    border-radius: var(--r-lg);
+    box-shadow: var(--sh-3);
+    overflow: hidden;
+}
+
+.ant-modal-header {
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 14px;
+}
+
+.ant-modal-title {
+    font-weight: 600;
+    color: var(--ink-800);
+}
+
+.ant-alert {
+    border-radius: var(--r-sm);
+}
+
+/* Retint the info Alert (antd default is stock blue #1890ff) to brand cyan */
+.ant-alert-info {
+    background: var(--brand-soft);
+    border-color: var(--brand-200);
+}
+
+    .ant-alert-info .ant-alert-icon {
+        color: var(--brand-600);
+    }
+
+.ant-popover-inner,
+.ant-popconfirm .ant-popover-inner {
+    border-radius: var(--r-md);
+    box-shadow: var(--sh-3);
+}
+
+/* Pagination */
+.ant-pagination-item-active {
+    border-color: var(--brand-600);
+}
+
+    .ant-pagination-item-active a {
+        color: var(--brand-600);
+    }
+
+.ant-pagination-item:hover {
+    border-color: var(--brand-400);
+}
+
+    .ant-pagination-item:hover a {
+        color: var(--brand-500);
+    }
+
+/* Divider / Empty / Tag / Tooltip */
+.ant-divider {
+    border-color: var(--border);
+    color: var(--ink-500);
+    font-weight: 600;
+    font-size: 13px;
+}
+
+.ant-tag {
+    border-radius: var(--r-sm);
+    font-family: var(--font-mono);
+    font-size: 12px;
+}
+
+.ant-tooltip-inner {
+    border-radius: var(--r-sm);
+    font-family: var(--font-ui);
+}
+
+/* Sider collapse trigger */
+.ant-layout-sider-trigger {
+    background: rgba(0, 0, 0, .28);
+    color: var(--ink-200);
+    border-top: 1px solid rgba(255, 255, 255, .06);
+}
+
+/* ---------- App shell (global: reaches AntDesign inner elements) ---------- */
+.ant-layout {
+    background: transparent;
+}
+
+.app-sider.ant-layout-sider {
+    background: radial-gradient(900px 260px at 30% -6%, rgba(6, 182, 212, .16) 0%, rgba(6, 182, 212, 0) 60%), linear-gradient(180deg, #101d33 0%, #0b1220 100%);
+    border-right: 1px solid rgba(255, 255, 255, .05);
+}
+
+.app-sider .ant-layout-sider-children {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+}
+
+/* Header / Content roots — defined globally (compound selectors beat antd
+   defaults and don't depend on CSS-isolation attribute forwarding onto the
+   AntDesign component root). Child elements stay scoped in MainLayout.razor.css. */
+.app-header.ant-layout-header {
+    height: 60px;
+    line-height: normal;
+    background: rgba(255, 255, 255, .92);
+    backdrop-filter: saturate(180%) blur(10px);
+    padding: 0 24px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 1px solid var(--border);
+    box-shadow: 0 1px 3px rgba(15, 23, 42, .04);
+    position: sticky;
+    top: 0;
+    z-index: 20;
+}
+
+.app-content.ant-layout-content {
+    margin: 18px;
+    padding: 22px 24px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--r-lg);
+    box-shadow: var(--sh-1);
+    min-height: 280px;
+}
+
+/* ============================================================
+   Layout helpers
+   ============================================================ */
+
+.page-title {
+    font-size: 20px;
+    font-weight: 700;
+    letter-spacing: -.01em;
+    color: var(--ink-800);
+    margin-bottom: 16px;
+}
+
+/* Page head: title + subtitle + right-aligned actions */
+.page-head {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
+}
+
+.page-head__titles {
+    min-width: 0;
+}
+
+.page-head__title {
+    font-size: 22px;
+    font-weight: 700;
+    letter-spacing: -.015em;
+    color: var(--ink-900);
+    line-height: 1.25;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.page-head__sub {
+    margin-top: 4px;
+    color: var(--ink-400);
+    font-size: 13px;
+}
+
+.page-head__actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+}
+
+/* Panel (card wrapper) */
+.panel {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--r-lg);
+    box-shadow: var(--sh-1);
+    overflow: hidden;
+}
+
+.panel__head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 14px 18px;
+    border-bottom: 1px solid var(--border);
+    background: linear-gradient(180deg, #fbfdff 0%, #f6f9fc 100%);
+}
+
+.panel__title {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--ink-700);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+    .panel__title .anticon {
+        color: var(--brand-600);
+    }
+
+.panel__body {
+    padding: 18px;
+    /* Let wide content (e.g. the projects Table on narrow viewports) scroll
+       horizontally inside the panel instead of being clipped by .panel{overflow:hidden}. */
+    overflow-x: auto;
+}
+
+.section-card {
+    margin-bottom: 16px;
+}
+
+/* Chips / status pills */
+.chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 26px;
+    padding: 0 10px;
+    border-radius: var(--r-pill);
+    background: var(--ink-050);
+    border: 1px solid var(--border);
+    color: var(--ink-500);
+    font-size: 12px;
+    font-family: var(--font-mono);
+    max-width: 100%;
+}
+
+    .chip .chip__k {
+        color: var(--ink-400);
+        font-family: var(--font-ui);
+    }
+
+    .chip .chip__v {
+        color: var(--ink-700);
+        font-weight: 500;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+.chip--brand {
+    background: var(--brand-soft);
+    border-color: var(--brand-200);
+    color: var(--brand-700);
+}
+
+    .chip--brand .chip__v, .chip--brand .chip__k {
+        color: var(--brand-700);
+    }
+
+/* Detail header (ProjectDetail) */
+.detail-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 18px;
+    flex-wrap: wrap;
+}
+
+.detail-header__meta {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-top: 8px;
+}
+
+/* ============================================================
+   Forms
+   ============================================================ */
+
+.form-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 18px 24px;
+}
+
+.form-item {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+
+.form-label {
+    font-weight: 600;
+    margin-bottom: 7px;
+    font-size: 13px;
+    color: var(--ink-600);
+    letter-spacing: .01em;
+}
+
+.form-hint {
+    color: var(--ink-400);
+    font-size: 12px;
+    margin-top: 8px;
+    word-break: break-all;
+    line-height: 1.6;
+}
+
+.server-row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    margin-bottom: 8px;
+}
+
+.native-select {
+    width: 100%;
+    height: 34px;
+    padding: 0 12px;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--r-sm);
+    background: #fff;
+    font-size: 14px;
+    font-family: var(--font-ui);
+    color: var(--ink-700);
+    outline: none;
+    cursor: pointer;
+    transition: border-color .18s ease, box-shadow .18s ease;
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 12px center;
+    padding-right: 32px;
+}
+
+    .native-select:hover {
+        border-color: var(--brand-400);
+    }
+
+    .native-select:focus {
+        border-color: var(--brand-500);
+        box-shadow: 0 0 0 3px var(--brand-soft);
+    }
+
+/* Settings rows */
+.setting-row {
+    padding: 16px 0;
+    border-bottom: 1px dashed var(--border);
+}
+
+    .setting-row:last-child {
+        border-bottom: none;
+    }
+
+.setting-label {
+    font-weight: 600;
+    margin-bottom: 8px;
+    color: var(--ink-700);
+    font-size: 14px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.setting-hint {
+    color: var(--ink-400);
+    font-size: 12px;
+    margin-top: 8px;
+    line-height: 1.7;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+/* ============================================================
+   Console (real-time deploy log)
+   ============================================================ */
+
+.console {
+    border-radius: var(--r-md);
+    overflow: hidden;
+    border: 1px solid #1b2740;
+    box-shadow: var(--sh-2);
+    background: #0d1526;
+}
+
+.console__bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 9px 14px;
+    background: linear-gradient(180deg, #16213a 0%, #111b30 100%);
+    border-bottom: 1px solid #1e2c47;
+}
+
+.console__label {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    color: #cbd5e1;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-weight: 500;
+    letter-spacing: .04em;
+}
+
+.console__dot {
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: var(--ink-500);
+    box-shadow: 0 0 0 0 rgba(6, 182, 212, .5);
+}
+
+.console__dot--live {
+    background: var(--brand-400);
+    animation: pulse 1.6s ease-out infinite;
+}
+
+.console__dot--ok {
+    background: var(--ok);
+}
+
+.console__dot--err {
+    background: var(--err);
+}
+
+.console__actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.deploy-log {
+    background: radial-gradient(1200px 400px at 50% -10%, #13203a 0%, #0d1526 60%);
+    color: #d7e0ee;
+    font-family: var(--font-mono);
+    font-size: 12.5px;
+    line-height: 1.75;
+    height: 380px;
+    overflow-y: auto;
+    padding: 12px 14px;
+    white-space: pre-wrap;
+    word-break: break-all;
+    scrollbar-color: #2b3b5c transparent;
+}
+
+    .deploy-log::-webkit-scrollbar-thumb {
+        background: #2b3b5c;
+        background-clip: content-box;
+    }
+
+    .deploy-log > div {
+        display: flex;
+        gap: 10px;
+        padding: 1px 0;
+        border-radius: 4px;
+    }
+
+    .deploy-log .log-time {
+        color: #55708f;
+        flex-shrink: 0;
+        user-select: none;
+        opacity: .8;
+    }
+
+    .deploy-log .log-text {
+        flex: 1;
+        min-width: 0;
+    }
+
+    .deploy-log .log-error {
+        color: #ff9d8a;
+        background: rgba(220, 38, 38, .10);
+    }
+
+    .deploy-log .log-warn {
+        color: #f4d58d;
+        background: rgba(217, 119, 6, .10);
+    }
+
+/* Empty console placeholder tone */
+.deploy-log:empty::before {
+    content: "等待日志输出…";
+    color: #4a5f80;
+    font-style: italic;
+}
+
+/* ============================================================
+   Motion
+   ============================================================ */
+
+@keyframes pulse {
+    0% {
+        box-shadow: 0 0 0 0 rgba(6, 182, 212, .55);
+    }
+
+    70% {
+        box-shadow: 0 0 0 7px rgba(6, 182, 212, 0);
+    }
+
+    100% {
+        box-shadow: 0 0 0 0 rgba(6, 182, 212, 0);
+    }
+}
+
+@keyframes fadeUp {
+    from {
+        opacity: 0;
+        transform: translateY(8px);
+    }
+
+    to {
+        opacity: 1;
+        transform: none;
+    }
+}
+
+.app-content > * {
+    animation: fadeUp .34s cubic-bezier(.2,.7,.3,1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+        animation-duration: .001ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: .001ms !important;
+    }
+
+    .ant-btn:not(.ant-btn-link):not(.ant-btn-text):hover {
+        transform: none;
+    }
+}
+
+/* ============================================================
+   Responsive
+   ============================================================ */
+
+@media (max-width: 900px) {
+    .form-grid {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .page-head {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+}
+
+/* ============================================================
+   项目列表：一键发布弹窗 & 行内进度
+   ============================================================ */
+
+.pub-form {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+
+.pub-form__item {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.pub-form__label {
+    font-size: 13px;
+    color: var(--ink-500, #555);
+    font-weight: 500;
+}
+
+.pub-progress {
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px dashed #eee;
+}
+
+.pub-progress__row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.pub-progress__text {
+    font-size: 12px;
+    color: var(--ink-400, #888);
+    word-break: break-all;
+}
+
+.pub-progress__actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 6px;
+}
+
+/* ============================================================
+   环境与服务器：忽略列表设置说明（可折叠）
+   ============================================================ */
+
+.ignore-help {
+    margin-bottom: 8px;
+    border: 1px solid #e6f0ff;
+    background: #f7fbff;
+    border-radius: 6px;
+    padding: 6px 10px;
+}
+
+.ignore-help > summary {
+    cursor: pointer;
+    font-size: 13px;
+    color: var(--brand-700, #1677ff);
+    font-weight: 500;
+    outline: none;
+}
+
+.ignore-help__body {
+    font-size: 12px;
+    color: var(--ink-500, #555);
+    line-height: 1.7;
+    margin-top: 6px;
+}
+
+.ignore-help__body p {
+    margin: 4px 0;
+}
+
+.ignore-help__body ul {
+    margin: 4px 0 4px 18px;
+    padding: 0;
+}
+
+.ignore-help__body code {
+    background: #eef2f7;
+    border-radius: 3px;
+    padding: 0 4px;
+    font-family: Consolas, Monaco, monospace;
+    color: #c41d7f;
+}
+
+/* ============ Agent 在线安装向导（W1.9） ============ */
+.wizard-steps {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 2px 0 14px;
+    margin-bottom: 16px;
+    border-bottom: 1px solid var(--line, #eee);
+}
+
+.wizard-step {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 5px 12px;
+    border-radius: 18px;
+    font-size: 13px;
+    color: var(--ink-400, #999);
+    background: #f4f5f7;
+    white-space: nowrap;
+}
+
+.wizard-step--active {
+    color: #fff;
+    background: var(--brand-500, #1677ff);
+    font-weight: 500;
+}
+
+.wizard-step--done {
+    color: var(--brand-600, #1677ff);
+    background: #e6f0ff;
+}
+
+.wizard-step__no {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 19px;
+    height: 19px;
+    border-radius: 50%;
+    background: rgba(0, 0, 0, .08);
+    font-size: 12px;
+}
+
+.wizard-step--active .wizard-step__no {
+    background: rgba(255, 255, 255, .28);
+}
+
+.wizard-step__sep {
+    flex: 1 1 12px;
+    height: 1px;
+    background: #e2e5ea;
+}
+
+.wizard-body {
+    min-height: 300px;
+    max-height: 62vh;
+    overflow-y: auto;
+    padding-right: 4px;
+}
+
+.wizard-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    padding-top: 14px;
+    margin-top: 14px;
+    border-top: 1px solid var(--line, #eee);
+}
+
+.wizard-sec {
+    margin-bottom: 18px;
+}
+
+.wizard-sec__title {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--ink-600, #333);
+    margin-bottom: 10px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.wizard-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px 16px;
+}
+
+.wizard-field {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+
+.wizard-field--full {
+    grid-column: 1 / -1;
+}
+
+.wizard-field__label {
+    font-size: 12px;
+    color: var(--ink-500, #666);
+    font-weight: 500;
+}
+
+.wizard-input {
+    width: 100%;
+    height: 32px;
+    padding: 4px 10px;
+    border: 1px solid #d9d9d9;
+    border-radius: 6px;
+    font-size: 13px;
+    color: #333;
+    background: #fff;
+    box-sizing: border-box;
+}
+
+.wizard-input:focus {
+    border-color: var(--brand-500, #1677ff);
+    outline: none;
+    box-shadow: 0 0 0 2px rgba(22, 119, 255, .1);
+}
+
+textarea.wizard-input {
+    height: auto;
+    min-height: 56px;
+    resize: vertical;
+    font-family: Consolas, Monaco, monospace;
+}
+
+.wizard-note {
+    font-size: 12px;
+    color: var(--ink-400, #999);
+    margin-top: 6px;
+    line-height: 1.7;
+}
+
+.srv-card {
+    border: 1px solid var(--line, #e8e8e8);
+    border-radius: 8px;
+    padding: 12px 14px;
+    margin-bottom: 12px;
+    background: #fcfcfd;
+}
+
+.srv-card__head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 10px;
+}
+
+.srv-card__title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--ink-600, #333);
+}
+
+.srv-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px 12px;
+}
+
+.result-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 8px 10px;
+    border-radius: 6px;
+    margin-bottom: 6px;
+    font-size: 13px;
+    line-height: 1.6;
+}
+
+.result-row--ok {
+    background: #f6ffed;
+    border: 1px solid #b7eb8f;
+}
+
+.result-row--fail {
+    background: #fff2f0;
+    border: 1px solid #ffccc7;
+}
+
+.result-row__icon {
+    flex: 0 0 auto;
+    font-weight: 700;
+}
+
+.result-row--ok .result-row__icon {
+    color: #389e0d;
+}
+
+.result-row--fail .result-row__icon {
+    color: #cf1322;
+}
+
+.result-row__host {
+    font-weight: 600;
+    margin-right: 6px;
+}
+
+.result-row__msg {
+    color: var(--ink-500, #555);
+}
+
+/* ============================================================
+   发布进度面板（DeployProgressPanel）
+   ============================================================ */
+
+.dp-panel {
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px dashed var(--border, #e4e9f0);
+}
+
+/* --- 总进度条区域 --- */
+.dp-overall {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 10px;
+}
+
+.dp-overall__bar {
+    flex: 1;
+    height: 8px;
+    background: var(--ink-100, #e2e8f0);
+    border-radius: 4px;
+    overflow: hidden;
+    position: relative;
+}
+
+.dp-overall__fill {
+    height: 100%;
+    border-radius: 4px;
+    background: var(--brand-grad);
+    transition: width 0.4s ease;
+}
+
+.dp-overall__fill--done {
+    background: linear-gradient(135deg, #16a34a 0%, #22c55e 100%);
+}
+
+.dp-overall__fill--fail {
+    background: linear-gradient(135deg, #dc2626 0%, #ef4444 100%);
+}
+
+.dp-overall__pct {
+    font-size: 13px;
+    font-weight: 700;
+    font-family: 'IBM Plex Mono', monospace;
+    color: var(--ink-700, #1e293b);
+    min-width: 38px;
+    text-align: right;
+}
+
+.dp-overall__phase {
+    font-size: 11px;
+    color: var(--ink-400, #64748b);
+    white-space: nowrap;
+}
+
+/* --- 阶段管线（Pipeline） --- */
+.dp-pipeline {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    margin-bottom: 12px;
+    padding: 6px 0;
+}
+
+.dp-pipe-step {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 11px;
+    color: var(--ink-300, #94a3b8);
+    transition: color 0.3s;
+}
+
+.dp-pipe-step--active {
+    color: var(--brand-600, #0891b2);
+    font-weight: 600;
+}
+
+.dp-pipe-step--done {
+    color: var(--ok, #16a34a);
+}
+
+.dp-pipe-step--fail {
+    color: var(--err, #dc2626);
+}
+
+.dp-pipe-step__icon {
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 10px;
+    border: 2px solid currentColor;
+    background: transparent;
+}
+
+.dp-pipe-step--done .dp-pipe-step__icon {
+    background: var(--ok, #16a34a);
+    border-color: var(--ok, #16a34a);
+    color: #fff;
+}
+
+.dp-pipe-step--fail .dp-pipe-step__icon {
+    background: var(--err, #dc2626);
+    border-color: var(--err, #dc2626);
+    color: #fff;
+}
+
+.dp-pipe-step--active .dp-pipe-step__icon {
+    border-color: var(--brand-500, #06b6d4);
+    color: var(--brand-500, #06b6d4);
+    animation: dp-pulse 1.2s infinite;
+}
+
+.dp-pipe-sep {
+    width: 20px;
+    height: 2px;
+    background: var(--ink-200, #cbd5e1);
+    margin: 0 4px;
+    border-radius: 1px;
+}
+
+.dp-pipe-sep--done {
+    background: var(--ok, #16a34a);
+}
+
+@keyframes dp-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+}
+
+/* --- 服务器卡片网格 --- */
+.dp-servers {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 6px;
+    margin-bottom: 8px;
+}
+
+.dp-srv {
+    border: 1px solid var(--border, #e4e9f0);
+    border-radius: 8px;
+    padding: 10px 12px;
+    background: var(--bg-card, #fff);
+    transition: border-color 0.3s, box-shadow 0.3s;
+    position: relative;
+    overflow: hidden;
+}
+
+.dp-srv::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 3px;
+    background: var(--ink-200, #cbd5e1);
+    transition: background 0.3s;
+}
+
+.dp-srv--ok::before {
+    background: linear-gradient(90deg, #16a34a, #4ade80);
+}
+
+.dp-srv--fail::before {
+    background: linear-gradient(90deg, #dc2626, #f87171);
+}
+
+.dp-srv--active::before {
+    background: var(--brand-grad);
+}
+
+.dp-srv--active {
+    border-color: var(--brand-300, #67e8f9);
+    box-shadow: 0 0 0 2px var(--brand-soft, rgba(8,145,178,0.10));
+}
+
+.dp-srv--ok {
+    border-color: #bbf7d0;
+}
+
+.dp-srv--fail {
+    border-color: #fecaca;
+}
+
+.dp-srv__head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+}
+
+.dp-srv__name {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--ink-700, #1e293b);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 150px;
+}
+
+.dp-srv__badge {
+    font-size: 14px;
+    line-height: 1;
+}
+
+.dp-srv__badge--ok { color: var(--ok, #16a34a); }
+.dp-srv__badge--fail { color: var(--err, #dc2626); }
+.dp-srv__badge--run { color: var(--brand-500, #06b6d4); animation: dp-pulse 1.2s infinite; }
+.dp-srv__badge--wait { color: var(--ink-300, #94a3b8); }
+
+/* --- 4 步骤指示器 --- */
+.dp-steps {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+}
+
+.dp-step {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    font-size: 10px;
+    padding: 2px 5px;
+    border-radius: 3px;
+    background: var(--ink-050, #f1f5f9);
+    color: var(--ink-300, #94a3b8);
+    white-space: nowrap;
+    transition: all 0.3s;
+}
+
+.dp-step--done {
+    background: var(--ok-soft, rgba(22,163,74,0.12));
+    color: var(--ok, #16a34a);
+    font-weight: 600;
+}
+
+.dp-step--fail {
+    background: var(--err-soft, rgba(220,38,38,0.12));
+    color: var(--err, #dc2626);
+    font-weight: 600;
+}
+
+.dp-step--active {
+    background: var(--brand-soft, rgba(8,145,178,0.10));
+    color: var(--brand-600, #0891b2);
+    font-weight: 600;
+}
+
+.dp-step__icon {
+    font-size: 10px;
+}
+
+/* --- 状态文案 --- */
+.dp-srv__status {
+    margin-top: 6px;
+    font-size: 11px;
+    color: var(--ink-400, #64748b);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.dp-srv__status--ok { color: var(--ok, #16a34a); }
+.dp-srv__status--fail { color: var(--err, #dc2626); }
+.dp-srv__status--active { color: var(--brand-600, #0891b2); }
+
+/* --- 操作按钮行 --- */
+.dp-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 8px;
+    align-items: center;
+}
+
+/* --- 完成/失败汇总 --- */
+.dp-summary {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+}
+
+.dp-summary__tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+.dp-summary__tag--ok {
+    background: var(--ok-soft, rgba(22,163,74,0.12));
+    color: var(--ok, #16a34a);
+}
+
+.dp-summary__tag--fail {
+    background: var(--err-soft, rgba(220,38,38,0.12));
+    color: var(--err, #dc2626);
+}
+
+.dp-summary__tag--partial {
+    background: var(--warn-soft, rgba(217,119,6,0.12));
+    color: var(--warn, #d97706);
+}
+
+.dp-summary__msg {
+    color: var(--ink-500, #475569);
+    word-break: break-all;
+}

@@ -1,0 +1,98 @@
+﻿@inherits LayoutComponentBase
+@inject NavigationManager Nav
+@inject CurrentUserService CurrentUser
+
+<Layout Style="min-height: 100vh;">
+    <Sider Class="app-sider" Theme="SiderTheme.Dark" Width="232" Collapsible="true">
+        <div class="app-logo">
+            <span class="app-logo__mark"><Icon Type="deployment-unit" /></span>
+            <span class="app-logo__text">AntDeploy</span>
+        </div>
+        <Menu Theme="MenuTheme.Dark" Mode="MenuMode.Inline" SelectedKeys="@SelectedKeys">
+            <MenuItem Key="projects" OnClick="@(() => Nav.NavigateTo("/projects"))">
+                <Icon Type="appstore" /><span>项目管理</span>
+            </MenuItem>
+            <MenuItem Key="history" OnClick="@(() => Nav.NavigateTo("/history"))">
+                <Icon Type="history" /><span>发布历史</span>
+            </MenuItem>
+            @if (CurrentUser.CanManageUsers)
+            {
+                <MenuItem Key="users" OnClick="@(() => Nav.NavigateTo("/users"))">
+                    <Icon Type="team" /><span>用户管理</span>
+                </MenuItem>
+            }
+            @if (CurrentUser.CanManageAgents)
+            {
+                <MenuItem Key="agents" OnClick="@(() => Nav.NavigateTo("/agents"))">
+                    <Icon Type="cloud-server" /><span>Agent 管理</span>
+                </MenuItem>
+            }
+            @if (CurrentUser.CanAccessSettings)
+            {
+                <MenuItem Key="settings" OnClick="@(() => Nav.NavigateTo("/settings"))">
+                    <Icon Type="setting" /><span>全局设置</span>
+                </MenuItem>
+            }
+        </Menu>
+        <div class="app-sider__foot">
+            <span class="app-sider__tag">Blazor Server · AntDeploy.Core</span>
+        </div>
+    </Sider>
+    <Layout>
+        <Header Class="app-header">
+            <div class="app-header__title">
+                <span class="app-header__accent"></span>
+                <span>@SectionTitle</span>
+            </div>
+            <div class="app-header__right">
+                @if (CurrentUser.IsAuthenticated)
+                {
+                    <span class="status-chip" title="当前登录用户">
+                        <Icon Type="user" />
+                        <span style="margin-left:6px;">@CurrentUser.DisplayName</span>
+                        <span style="margin-left:6px;color:#0e7490;font-weight:600;">@CurrentUser.RoleText</span>
+                    </span>
+                    <form method="post" action="/account/logout" data-enhance="false" style="margin:0;">
+                        <button type="submit" class="btn-mini" title="注销登录">注销</button>
+                    </form>
+                }
+            </div>
+        </Header>
+        <Content Class="app-content">
+            @Body
+        </Content>
+    </Layout>
+</Layout>
+
+@code {
+    private string Path => Nav.ToBaseRelativePath(Nav.Uri).TrimStart('/');
+
+    protected override async Task OnInitializedAsync()
+    {
+        await CurrentUser.LoadAsync();
+    }
+
+    private string[] SelectedKeys =>
+        Path.StartsWith("settings", StringComparison.OrdinalIgnoreCase)
+            ? new[] { "settings" }
+            : Path.StartsWith("users", StringComparison.OrdinalIgnoreCase)
+                ? new[] { "users" }
+                : Path.StartsWith("agents", StringComparison.OrdinalIgnoreCase)
+                    ? new[] { "agents" }
+                    : Path.StartsWith("history", StringComparison.OrdinalIgnoreCase)
+                        ? new[] { "history" }
+                        : new[] { "projects" };
+
+    private string SectionTitle
+    {
+        get
+        {
+            if (Path.StartsWith("settings", StringComparison.OrdinalIgnoreCase)) return "全局设置";
+            if (Path.StartsWith("users", StringComparison.OrdinalIgnoreCase)) return "用户管理";
+            if (Path.StartsWith("agents", StringComparison.OrdinalIgnoreCase)) return "Agent 管理";
+            if (Path.StartsWith("history", StringComparison.OrdinalIgnoreCase)) return "发布历史";
+            if (Path.StartsWith("project/", StringComparison.OrdinalIgnoreCase)) return "项目配置与部署";
+            return "项目管理";
+        }
+    }
+}

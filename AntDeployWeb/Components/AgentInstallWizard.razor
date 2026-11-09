@@ -1,0 +1,665 @@
+@*
+    Agent 在线安装向导（W1.9）：多步 Modal —— ① 基本信息 ② 服务器与凭据 + Agent 配置
+    ③ 执行安装（实时日志控制台 + 逐台 ✓/✗ + 连接验证） ④ 完成（保留本次信息 → 加密入库 / 不入库）。
+    由 Agents.razor 通过 @bind-Visible 打开；Editing 非空时为“重装/编辑”预填；OnSaved 用于保存后刷新列表。
+    日志经后台线程回调追加，统一在锁内改集合 + InvokeAsync 节流渲染（遵循 Blazor Server 线程安全约定）。
+*@
+@using Newtonsoft.Json
+@using AntDeployWeb.Services.Remote
+@inject AgentInstaller Installer
+@inject AgentVerifier Verifier
+@inject AgentService AgentStore
+@inject CurrentUserService CurrentUser
+@inject MessageService Message
+
+<Modal Title="@WizardTitle"
+       Visible="@Visible"
+       OnCancel="@(() => CloseAsync())"
+       Footer="null"
+       Width="980"
+       MaskClosable="false">
+    <div class="wizard-steps">
+        @for (var i = 1; i <= 4; i++)
+        {
+            <div class="wizard-step @StepCss(i)"><span class="wizard-step__no">@i</span><span>@StepName(i)</span></div>
+            @if (i < 4)
+            {
+                <div class="wizard-step__sep"></div>
+            }
+        }
+    </div>
+
+    <div class="wizard-body">
+        @* ---------------- 步骤 1：基本信息 ---------------- *@
+        @if (_step == 1)
+        {
+            <div class="wizard-sec">
+                <div class="wizard-sec__title"><Icon Type="profile" />基本信息</div>
+                <div class="wizard-grid">
+                    <div class="wizard-field wizard-field--full">
+                        <span class="wizard-field__label">Agent 客户端名称 *</span>
+                        <input class="wizard-input" @bind="_name" placeholder="如 生产环境 Windows 集群" />
+                    </div>
+                    <div class="wizard-field">
+                        <span class="wizard-field__label">服务器类型 *</span>
+                        <select class="native-select wizard-input" value="@_osType" @onchange="OnOsChanged">
+                            <option value="windows">Windows</option>
+                            <option value="linux">Linux</option>
+                        </select>
+                    </div>
+                    <div class="wizard-field">
+                        <span class="wizard-field__label">团队归属</span>
+                        @if (CurrentUser.IsSuperAdmin)
+                        {
+                            <select class="native-select wizard-input" @bind="_teamId">
+                                <option value="">（未分配 · 仅超管可见）</option>
+                                @foreach (var t in Teams)
+                                {
+                                    <option value="@t.Id">@t.Name</option>
+                                }
+                            </select>
+                        }
+                        else
+                        {
+                            <div class="wizard-note" style="margin-top:4px;">将自动归属你所在的团队。</div>
+                        }
+                    </div>
+                </div>
+            </div>
+        }
+
+        @* ---------------- 步骤 2：服务器与凭据 + Agent 配置 ---------------- *@
+        else if (_step == 2)
+        {
+            <div class="wizard-sec">
+                <div class="wizard-sec__title">
+                    <Icon Type="cloud-server" />目标服务器与凭据（一套配置多台）
+                    <span style="margin-left:auto;"><Button Size="ButtonSize.Small" Icon="plus" OnClick="AddServer">添加服务器</Button></span>
+                </div>
+                @if (_servers.Count == 0)
+                {
+                    <div class="wizard-note">尚未添加服务器，请点击「添加服务器」。</div>
+                }
+                @for (var i = 0; i < _servers.Count; i++)
+                {
+                    var s = _servers[i];
+                    var no = i + 1;
+                    <div class="srv-card">
+                        <div class="srv-card__head">
+                            <span class="srv-card__title">服务器 #@no</span>
+                            <Button Size="ButtonSize.Small" Danger="true" OnClick="@(() => RemoveServer(s))">移除</Button>
+                        </div>
+                        <div class="srv-grid">
+                            <div class="wizard-field">
+                                <span class="wizard-field__label">IP / 主机 *</span>
+                                <input class="wizard-input" @bind="s.Host" placeholder="192.168.1.10 或 host.example.com" />
+                            </div>
+                            <div class="wizard-field">
+                                <span class="wizard-field__label">远程通道</span>
+                                <select class="native-select wizard-input" @bind="s.Transport">
+                                    <option value="ssh">SSH</option>
+                                    @if (IsWindows)
+                                    {
+                                        <option value="winrm">WinRM</option>
+                                    }
+                                </select>
+                            </div>
+                            <div class="wizard-field">
+                                <span class="wizard-field__label">通道端口</span>
+                                <input class="wizard-input" type="number" @bind="s.Port" placeholder="@(s.IsWinRm ? "5985" : "22")" />
+                                <span class="wizard-note">留空 = SSH 22 / WinRM 5985</span>
+                            </div>
+                            <div class="wizard-field">
+                                <span class="wizard-field__label">登录账号 *</span>
+                                <input class="wizard-input" @bind="s.UserName" placeholder="Administrator / root / DOMAIN\user" />
+                            </div>
+                            <div class="wizard-field">
+                                <span class="wizard-field__label">密码</span>
+                                <input class="wizard-input" type="password" @bind="s.Pwd" placeholder="登录密码" />
+                            </div>
+                            @if (s.IsWinRm)
+                            {
+                                <div class="wizard-field">
+                                    <span class="wizard-field__label">AD 域（可选）</span>
+                                    <input class="wizard-input" @bind="s.Domain" placeholder="DOMAIN 或 domain.com" />
+                                </div>
+                            }
+                            else
+                            {
+                                <div class="wizard-field wizard-field--full">
+                                    <span class="wizard-field__label">SSH 私钥（可选，与密码二选一）</span>
+                                    <textarea class="wizard-input" @bind="s.PrivateKey" placeholder="-----BEGIN OPENSSH PRIVATE KEY-----"></textarea>
+                                </div>
+                            }
+                        </div>
+                    </div>
+                }
+                @if (!IsWindows)
+                {
+                    <div class="wizard-note">Linux 服务器仅支持 SSH 通道（需目标机已装 OpenSSH Server）。</div>
+                }
+                else if (!WinRmTransport.HostSupportsWinRm)
+                {
+                    <div class="wizard-note" style="color:#d4380d;">当前 AntDeployWeb 宿主非 Windows，WinRM 通道不可用；请对 Windows 服务器改用 SSH（OpenSSH）。</div>
+                }
+            </div>
+
+            <div class="wizard-sec">
+                <div class="wizard-sec__title"><Icon Type="setting" />Agent 运行配置（写入目标机 agentsettings.json）</div>
+                <div class="wizard-grid">
+                    <div class="wizard-field wizard-field--full">
+                        <span class="wizard-field__label">安装目录（留空用默认：@AgentClient.GetDefaultInstallDir(_osType)）</span>
+                        <input class="wizard-input" @bind="_installDir" placeholder="@AgentClient.GetDefaultInstallDir(_osType)" />
+                    </div>
+                    <div class="wizard-field">
+                        <span class="wizard-field__label">授权 Token *</span>
+                        <input class="wizard-input" type="password" @bind="_config.Token" placeholder="与发布端一致的 Token" />
+                        <span class="wizard-note">默认 AntDeploy@publish#；须与目标机一致（回显脱敏）。</span>
+                    </div>
+                    <div class="wizard-field">
+                        <span class="wizard-field__label">Agent 通讯端口 (HTTP)</span>
+                        <input class="wizard-input" type="number" @bind="_config.Port" />
+                    </div>
+                    <div class="wizard-field">
+                        <span class="wizard-field__label">发布根目录 DeployDir（空 = 程序目录）</span>
+                        <input class="wizard-input" @bind="_config.DeployDir" />
+                    </div>
+                    <div class="wizard-field">
+                        <span class="wizard-field__label">Mac 白名单（逗号分隔，空 = 不限）</span>
+                        <input class="wizard-input" @bind="_config.MacWhiteList" />
+                    </div>
+                    <div class="wizard-field">
+                        <span class="wizard-field__label">备份保留个数（0 = 同发布历史）</span>
+                        <input class="wizard-input" type="number" @bind="_config.BackUpLimit" />
+                    </div>
+                    <div class="wizard-field">
+                        <span class="wizard-field__label">发布历史保留个数</span>
+                        <input class="wizard-input" type="number" @bind="_config.OldPublishLimit" />
+                    </div>
+                    <div class="wizard-field">
+                        <span class="wizard-field__label">清理超过 N 天的旧发布（0 = 不清理）</span>
+                        <input class="wizard-input" type="number" @bind="_config.ClearOldPublishFolderOverDays" />
+                    </div>
+                    <div class="wizard-field">
+                        <span class="wizard-field__label">启用备份</span>
+                        <label style="display:flex;align-items:center;gap:6px;height:32px;font-size:13px;">
+                            <input type="checkbox" @bind="_config.NeedBackUp" /> NeedBackUp
+                        </label>
+                    </div>
+                </div>
+                <div class="wizard-note">Token / 白名单 / 备份等改后热生效；「Agent 通讯端口」变更需重启 Agent 服务才会重新监听。</div>
+            </div>
+        }
+
+        @* ---------------- 步骤 3：执行安装 ---------------- *@
+        else if (_step == 3)
+        {
+            <div class="wizard-sec">
+                <div class="wizard-sec__title"><Icon Type="play-circle" />执行安装</div>
+                @if (!_running && !_done)
+                {
+                    <div class="wizard-note" style="margin-bottom:12px;">
+                        将安装 <b>@_name</b>（@OsText(_osType)）到 <b>@_servers.Count</b> 台服务器，安装目录
+                        <b>@(string.IsNullOrWhiteSpace(_installDir) ? AgentClient.GetDefaultInstallDir(_osType) : _installDir)</b>，
+                        Agent 端口 <b>@_config.Port</b>。<br />
+                        逐台执行：连接测试 → 上传产物 → 安装为服务并启动 → 放行防火墙 → 本机自检 → 外机连接验证。日志实时显示。
+                    </div>
+                }
+                <DeployLogConsole Lines="LogSnapshot"
+                                  Live="_running"
+                                  Header="安装日志 · INSTALL LOG"
+                                  SubHeader="@(_running ? "安装中…" : (_done ? "已完成" : "等待开始"))"
+                                  Height="340px" />
+                @if (_results.Count > 0)
+                {
+                    <div class="wizard-sec__title" style="margin-top:16px;">逐台结果</div>
+                    @foreach (var r in _results)
+                    {
+                        <div class="result-row @(r.Success ? "result-row--ok" : "result-row--fail")">
+                            <span class="result-row__icon">@(r.Success ? "✓" : "✗")</span>
+                            <span><span class="result-row__host">@r.Host</span><span class="result-row__msg">@r.Msg</span></span>
+                        </div>
+                    }
+                }
+            </div>
+        }
+
+        @* ---------------- 步骤 4：完成 ---------------- *@
+        else if (_step == 4)
+        {
+            <div class="wizard-sec">
+                <div class="wizard-sec__title"><Icon Type="check-circle" />完成</div>
+                @{
+                    var okc = _results.Count(r => r.Success);
+                    var fc = _results.Count - okc;
+                }
+                <div class="wizard-note" style="margin-bottom:12px;">
+                    共 @_results.Count 台，<b style="color:#389e0d;">@okc 台正常</b>，<b style="color:#cf1322;">@fc 台失败</b>。
+                </div>
+                @foreach (var r in _results)
+                {
+                    <div class="result-row @(r.Success ? "result-row--ok" : "result-row--fail")">
+                        <span class="result-row__icon">@(r.Success ? "✓" : "✗")</span>
+                        <span><span class="result-row__host">@r.Host</span><span class="result-row__msg">@r.Msg</span></span>
+                    </div>
+                }
+                <div style="margin-top:16px;">
+                    <label style="display:flex;align-items:flex-start;gap:8px;font-size:13px;line-height:1.6;">
+                        <input type="checkbox" style="margin-top:3px;" @bind="_keepInfo" />
+                        <span>保留本次信息（凭据 AES 加密入库，可在列表中查询 / 重装 / 在线同步配置）；不勾选则仅本次会话使用、不落库。</span>
+                    </label>
+                </div>
+            </div>
+        }
+    </div>
+
+    <div class="wizard-footer">
+        @if (_step == 1)
+        {
+            <Button OnClick="@(() => CloseAsync())">取消</Button>
+            <Button Type="ButtonType.Primary" OnClick="Next">下一步：服务器与配置</Button>
+        }
+        else if (_step == 2)
+        {
+            <Button OnClick="Prev">上一步</Button>
+            <Button Type="ButtonType.Primary" OnClick="Next">下一步：执行安装</Button>
+        }
+        else if (_step == 3)
+        {
+            @if (!_running && !_done)
+            {
+                <Button OnClick="Prev">上一步</Button>
+            }
+            @if (_running)
+            {
+                <Button Danger="true" OnClick="CancelInstall">取消安装</Button>
+            }
+            else if (!_done)
+            {
+                <Button Type="ButtonType.Primary" OnClick="StartInstall">开始安装</Button>
+            }
+            else
+            {
+                <Button Type="ButtonType.Primary" OnClick="Next">下一步：完成</Button>
+            }
+        }
+        else if (_step == 4)
+        {
+            <Button OnClick="Prev">返回日志</Button>
+            <Button Type="ButtonType.Primary" OnClick="FinishAsync">@(_keepInfo ? "保存并关闭" : "关闭")</Button>
+        }
+    </div>
+</Modal>
+
+@code {
+    [Parameter] public bool Visible { get; set; }
+    [Parameter] public EventCallback<bool> VisibleChanged { get; set; }
+    /// <summary>非空时为“重装 / 编辑配置”预填（不直接改动传入对象，内部克隆）。</summary>
+    [Parameter] public AgentClient? Editing { get; set; }
+    [Parameter] public List<TeamEntity> Teams { get; set; } = new();
+    /// <summary>保存入库后回调（父页刷新列表）。</summary>
+    [Parameter] public EventCallback OnSaved { get; set; }
+
+    private bool _lastVisible;
+    private int _step = 1;
+    private string _editId = string.Empty;
+
+    // 步骤 1
+    private string _name = string.Empty;
+    private string _osType = "windows";
+    private string _teamId = string.Empty;
+
+    // 步骤 2
+    private List<AgentServerItem> _servers = new();
+    private string _installDir = string.Empty;
+    private AgentConfigDto _config = new();
+
+    // 步骤 3
+    private bool _running;
+    private bool _done;
+    private List<HostResult> _results = new();
+    private CancellationTokenSource? _cts;
+    private readonly List<LogEntry> _logs = new();
+    private readonly object _logLock = new();
+    private int _renderQueued;
+
+    // 步骤 4
+    private bool _keepInfo;
+
+    private bool IsWindows => string.Equals(_osType, "windows", StringComparison.OrdinalIgnoreCase);
+    private string WizardTitle => string.IsNullOrWhiteSpace(_name) ? "在线安装 Agent" : "在线安装 Agent · " + _name.Trim();
+
+    protected override void OnParametersSet()
+    {
+        if (Visible && !_lastVisible) ResetWizard();
+        _lastVisible = Visible;
+    }
+
+    private void ResetWizard()
+    {
+        _step = 1;
+        _running = false;
+        _done = false;
+        _results = new List<HostResult>();
+        lock (_logLock) _logs.Clear();
+        try { _cts?.Dispose(); } catch { }
+        _cts = null;
+
+        if (Editing != null)
+        {
+            _editId = Editing.Id ?? string.Empty;
+            _name = Editing.Name ?? string.Empty;
+            _osType = string.IsNullOrWhiteSpace(Editing.OsType) ? "windows" : Editing.OsType;
+            _teamId = Editing.TeamId ?? (CurrentUser.IsTeamAdmin ? CurrentUser.TeamId ?? string.Empty : string.Empty);
+            _servers = Clone(Editing.Servers) ?? new List<AgentServerItem>();
+            if (_servers.Count == 0) _servers.Add(NewServer());
+            _installDir = Editing.Servers?.FirstOrDefault()?.InstallDir ?? string.Empty;
+            _config = Clone(Editing.Config) ?? DefaultConfig();
+            _keepInfo = true; // 已入库，默认更新
+        }
+        else
+        {
+            _editId = string.Empty;
+            _name = string.Empty;
+            _osType = "windows";
+            _teamId = CurrentUser.IsTeamAdmin ? CurrentUser.TeamId ?? string.Empty : string.Empty;
+            _servers = new List<AgentServerItem> { NewServer() };
+            _installDir = string.Empty;
+            _config = DefaultConfig();
+            _keepInfo = false;
+        }
+    }
+
+    private static AgentConfigDto DefaultConfig() =>
+        new AgentConfigDto { Port = AgentInstaller.DefaultPort, Token = "AntDeploy@publish#" };
+
+    private static AgentServerItem NewServer() =>
+        new AgentServerItem { Host = string.Empty, Transport = "ssh", UserName = string.Empty };
+
+    private static T? Clone<T>(T? src) where T : class =>
+        src == null ? null : JsonConvert.DeserializeObject<T>(JsonConvert.SerializeObject(src));
+
+    private void OnOsChanged(ChangeEventArgs e)
+    {
+        _osType = e.Value?.ToString() ?? "windows";
+        if (!IsWindows)
+        {
+            foreach (var s in _servers) s.Transport = "ssh"; // Linux 不支持 WinRM
+        }
+    }
+
+    private void AddServer() => _servers.Add(NewServer());
+
+    private void RemoveServer(AgentServerItem s) => _servers.Remove(s);
+
+    // ---------------- 校验 ----------------
+
+    private bool ValidateStep1(out string err)
+    {
+        if (string.IsNullOrWhiteSpace(_name)) { err = "请填写 Agent 客户端名称"; return false; }
+        err = string.Empty;
+        return true;
+    }
+
+    private bool ValidateStep2(out string err)
+    {
+        err = string.Empty;
+        if (_servers.Count == 0) { err = "请至少添加一台服务器"; return false; }
+        for (var i = 0; i < _servers.Count; i++)
+        {
+            var s = _servers[i];
+            var tag = "服务器 #" + (i + 1);
+            if (string.IsNullOrWhiteSpace(s.Host)) { err = tag + "：请填写 IP / 主机"; return false; }
+            if (string.IsNullOrWhiteSpace(s.UserName)) { err = tag + "：请填写登录账号"; return false; }
+            var hasPwd = !string.IsNullOrWhiteSpace(s.Pwd);
+            var hasKey = !string.IsNullOrWhiteSpace(s.PrivateKey);
+            if (s.IsWinRm)
+            {
+                if (!IsWindows) { err = tag + "：WinRM 仅适用于 Windows 服务器"; return false; }
+                if (!hasPwd) { err = tag + "：WinRM 通道需要密码"; return false; }
+            }
+            else if (!hasPwd && !hasKey)
+            {
+                err = tag + "：请填写密码或 SSH 私钥"; return false;
+            }
+        }
+        if (string.IsNullOrWhiteSpace(_config.Token)) { err = "请填写 Agent 授权 Token（发布与在线配置同步需要）"; return false; }
+        if (_config.Port <= 0 || _config.Port > 65535) { err = "Agent 通讯端口需在 1 - 65535 之间"; return false; }
+        if (!string.IsNullOrWhiteSpace(_installDir))
+        {
+            var d = _installDir.Trim();
+            if (IsWindows)
+            {
+                if (!(d.Length >= 3 && char.IsLetter(d[0]) && d[1] == ':' && (d[2] == '\\' || d[2] == '/')))
+                {
+                    err = "Windows 安装目录需为盘符绝对路径，如 C:\\AntDeploy\\Agent";
+                    return false;
+                }
+            }
+            else if (!d.StartsWith("/"))
+            {
+                err = "Linux 安装目录需为绝对路径，如 /opt/antdeploy/agent";
+                return false;
+            }
+        }
+        return true;
+    }
+
+    // ---------------- 导航 ----------------
+
+    private void Next()
+    {
+        if (_step == 1)
+        {
+            if (!ValidateStep1(out var e)) { Message.Warning(e); return; }
+            _step = 2;
+        }
+        else if (_step == 2)
+        {
+            if (!ValidateStep2(out var e)) { Message.Warning(e); return; }
+            _step = 3;
+        }
+        else if (_step == 3 && _done)
+        {
+            _step = 4;
+        }
+    }
+
+    private void Prev()
+    {
+        if (_running) return;
+        if (_step > 1) _step--;
+    }
+
+    private AgentClient BuildClient()
+    {
+        var servers = Clone(_servers) ?? new List<AgentServerItem>();
+        var dir = (_installDir ?? string.Empty).Trim();
+        foreach (var s in servers) s.InstallDir = dir;
+        return new AgentClient
+        {
+            Id = _editId ?? string.Empty,
+            Name = (_name ?? string.Empty).Trim(),
+            OsType = _osType,
+            TeamId = string.IsNullOrWhiteSpace(_teamId) ? null : _teamId.Trim(),
+            Servers = servers,
+            Config = Clone(_config) ?? DefaultConfig()
+        };
+    }
+
+    // ---------------- 执行安装 + 连接验证 ----------------
+
+    private async Task StartInstall()
+    {
+        if (_running) return;
+        if (!ValidateStep2(out var verr)) { Message.Warning(verr); _step = 2; return; }
+
+        _running = true;
+        _done = false;
+        _results = new List<HostResult>();
+        lock (_logLock) _logs.Clear();
+        try { _cts?.Dispose(); } catch { }
+        _cts = new CancellationTokenSource();
+        var client = BuildClient();
+        StateHasChanged();
+
+        try
+        {
+            AppendLog("===== 开始在线安装 Agent「" + client.Name + "」 =====");
+            AppendLog("目标：" + client.ServerCount + " 台 " + OsText(client.OsType) + " 服务器；安装目录："
+                + (string.IsNullOrWhiteSpace(_installDir) ? AgentClient.GetDefaultInstallDir(client.OsType) + "（默认）" : _installDir.Trim())
+                + "；Agent 端口：" + client.Config.Port);
+            AppendLog("本地产物目录：" + Installer.GetProductsDir(client.OsType));
+
+            var installResults = await Installer.InstallAsync(client, AppendLog, _cts.Token);
+
+            AppendLog(string.Empty);
+            AppendLog("===== 安装阶段结束，开始连接验证（外机 /version + 本机自检对比）=====");
+            var verifyResults = await Verifier.VerifyAsync(client, AppendLog, _cts.Token);
+
+            _results = MergeResults(installResults, verifyResults);
+            client.LastResults = _results;
+            _done = true;
+
+            var ok = _results.Count(r => r.Success);
+            AppendLog(string.Empty);
+            AppendLog("===== 全部完成：" + ok + "/" + _results.Count + " 台连接正常 =====");
+        }
+        catch (OperationCanceledException)
+        {
+            AppendLog("[Warn] 安装已取消");
+            _done = true;
+        }
+        catch (Exception ex)
+        {
+            AppendLog("[Error] 安装异常：" + ex.Message);
+            _done = true;
+        }
+        finally
+        {
+            _running = false;
+            _ = InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private void CancelInstall()
+    {
+        try { _cts?.Cancel(); } catch { }
+    }
+
+    /// <summary>合并“安装结果”与“连接验证结果”：安装失败即以安装结果为准；安装成功则采用验证结果（并说明已安装）。</summary>
+    private static List<HostResult> MergeResults(List<HostResult> install, List<HostResult> verify)
+    {
+        var merged = new List<HostResult>();
+        var vmap = new Dictionary<string, HostResult>(StringComparer.OrdinalIgnoreCase);
+        foreach (var v in verify) if (!vmap.ContainsKey(v.Host)) vmap[v.Host] = v;
+
+        foreach (var ir in install)
+        {
+            if (!ir.Success) { merged.Add(ir); continue; }
+            if (vmap.TryGetValue(ir.Host, out var vr))
+            {
+                merged.Add(new HostResult
+                {
+                    Host = ir.Host,
+                    Display = ir.Display,
+                    Success = vr.Success,
+                    Msg = vr.Success ? "已安装并启动；" + vr.Msg : "已安装并启动，但连接验证失败：" + vr.Msg
+                });
+            }
+            else
+            {
+                merged.Add(ir);
+            }
+        }
+        return merged;
+    }
+
+    private async Task FinishAsync()
+    {
+        if (_keepInfo)
+        {
+            var client = BuildClient();
+            client.LastResults = _results;
+            if (!string.IsNullOrEmpty(_editId) && !CurrentUser.CanEditAgent(client))
+            {
+                Message.Warning("无权保存该 Agent 客户端");
+                return;
+            }
+            AgentStore.Save(client);
+            await OnSaved.InvokeAsync();
+            Message.Success("已保存 Agent 客户端信息（凭据已加密入库）");
+        }
+        else
+        {
+            Message.Info("未保留本次信息（仅本次会话，不入库）");
+        }
+        await CloseAsync();
+    }
+
+    private async Task CloseAsync()
+    {
+        try { _cts?.Cancel(); } catch { }
+        await VisibleChanged.InvokeAsync(false);
+    }
+
+    // ---------------- 实时日志（线程安全 + 节流渲染） ----------------
+
+    private void AppendLog(string? msg)
+    {
+        if (msg == null) return;
+        var entry = new LogEntry
+        {
+            Time = DateTime.Now.ToString("HH:mm:ss"),
+            Text = msg,
+            Css = ClassifyLog(msg)
+        };
+        lock (_logLock)
+        {
+            _logs.Add(entry);
+            if (_logs.Count > 2000) _logs.RemoveAt(0);
+        }
+        QueueRender();
+    }
+
+    private void QueueRender()
+    {
+        if (System.Threading.Interlocked.CompareExchange(ref _renderQueued, 1, 0) == 0)
+        {
+            _ = Task.Delay(150).ContinueWith(_ => InvokeAsync(() =>
+            {
+                System.Threading.Interlocked.Exchange(ref _renderQueued, 0);
+                StateHasChanged();
+            }));
+        }
+    }
+
+    private List<LogEntry> LogSnapshot
+    {
+        get { lock (_logLock) return _logs.ToList(); }
+    }
+
+    private static string ClassifyLog(string msg)
+    {
+        if (string.IsNullOrEmpty(msg)) return string.Empty;
+        if (msg.Contains("[Error]") || msg.Contains("✗") || msg.Contains("失败") || msg.Contains("Fail")) return "log-error";
+        if (msg.Contains("[Warn]") || msg.Contains("警告")) return "log-warn";
+        return string.Empty;
+    }
+
+    // ---------------- 展示辅助 ----------------
+
+    private string StepName(int i) => i switch
+    {
+        1 => "基本信息",
+        2 => "服务器与配置",
+        3 => "执行安装",
+        4 => "完成",
+        _ => string.Empty
+    };
+
+    private string StepCss(int i) => i == _step ? "wizard-step--active" : (i < _step ? "wizard-step--done" : string.Empty);
+
+    private static string OsText(string os) =>
+        string.Equals(os, "linux", StringComparison.OrdinalIgnoreCase) ? "Linux" : "Windows";
+}

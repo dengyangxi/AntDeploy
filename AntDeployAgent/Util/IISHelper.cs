@@ -506,6 +506,42 @@ namespace AntDeployAgentWindows.Util
         }
 
         /// <summary>
+        /// 读取站点第一个绑定的端口，用于相对路径回调组装本机地址(http://127.0.0.1:{port}{path})。
+        /// 失败或未找到返回 null（best-effort，不阻断发布）。
+        /// </summary>
+        public static string GetSiteBindPort(string name, Action<string> log = null)
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(name)) return null;
+                if (IsDefaultWebSite(name))
+                {
+                    name = "Default Web Site";
+                }
+                using (ServerManager iis = new ServerManager())
+                {
+                    var site = iis.Sites.FirstOrDefault(r => r.Name.ToLower().Equals(name.ToLower()));
+                    if (site == null) return null;
+                    foreach (var b in site.Bindings)
+                    {
+                        // http(s) 绑定的 BindingInformation 形如 ":8080:hostname" 或 "*:80:hostname"
+                        var parts = (b.BindingInformation ?? string.Empty).Split(':');
+                        if (parts.Length >= 2 && !string.IsNullOrEmpty(parts[1]))
+                        {
+                            return parts[1];
+                        }
+                    }
+                    return null;
+                }
+            }
+            catch (Exception ex)
+            {
+                if (log != null) log("get iis bind port err:" + ex.Message);
+                return null;
+            }
+        }
+
+        /// <summary>
         /// 更改物理路径
         /// </summary>
         /// <returns></returns>

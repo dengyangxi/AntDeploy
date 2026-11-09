@@ -1,0 +1,36 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>AntDeployWeb</RootNamespace>
+    <AssemblyName>AntDeployWeb</AssemblyName>
+    <!-- App_Data 是运行时数据目录：workspace 下存放用户克隆的仓库源码、antdeploy.json 存放用户配置。
+         必须排除在 SDK 默认 globbing 之外，否则用户仓库里的 .cs 会被当作本项目源码一起编译（如遇
+         合并冲突残留的 .BACKUP.cs 会导致 AntDeployWeb 编译失败），且发布时会覆盖用户真实配置。
+         AgentService 为 publish-agents.ps1 生成的自包含 Agent 产物，含 *.json/*.config 会被 Web SDK
+         默认 Content glob 自动纳入，与下方显式 Content Include 冲突（NETSDK1022），故一并排除默认 glob。 -->
+    <DefaultItemExcludes>$(DefaultItemExcludes);App_Data\**;AgentService\**</DefaultItemExcludes>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="AntDesign" Version="1.6.2" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="9.0.0" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" Version="9.0.0" />
+    <PackageReference Include="Pomelo.EntityFrameworkCore.MySql" Version="9.0.0-preview.3.efcore.9.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\AntDeploy.Core\AntDeploy.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Agent 自包含发布产物随 Web 发布携带（运行时按 ContentRootPath/AgentService/{Windows|Linux} 定位）。
+         用 None（而非 Content）承载：Content 会进入 .NET 9 静态 Web 资源(SWA)管线，非 wwwroot 的 Content glob
+         会触发 DiscoverPrecompressedAssets 重复键(wwwroot/app.css)构建错误；None 项会被复制到输出/发布目录
+         但不参与 SWA。空目录（未运行 publish-agents.ps1）时 glob 无匹配亦安全；.gitkeep 保证目录占位存在。 -->
+    <None Include="AgentService\**" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

@@ -44,14 +44,14 @@
     <PackageReference Include="System.IO.Compression.ZipFile" Version="4.3.0" />
     <PackageReference Include="Microsoft.Web.Administration" Version="11.1.0" />
   
-    <PackageReference Include="Newtonsoft.Json" Version="13.0.2" />
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
   
-    <PackageReference Include="System.Management" Version="5.0.0" />
+    <PackageReference Include="System.Management" Version="10.0.14" />
     <PackageReference Include="TinyFox.Microsoft.Owin" Version="4.0.1" />
   </ItemGroup>
 
   <ItemGroup Condition=" '$(TargetFramework)' == 'net472' ">
-    <PackageReference Include="TinyFox" Version="4.2.8" />
+    <PackageReference Include="TinyFox" Version="6.26.7" />
     <Reference Include="System.Net" />
     <Reference Include="System.Configuration" />
   </ItemGroup>

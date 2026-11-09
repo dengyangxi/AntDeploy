@@ -2,11 +2,12 @@
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
-using AntDeployAgent.Model;
-using AntDeployAgent.Operation;
-using AntDeployAgent.Util;
-using AntDeployAgent.WebApiCore;
+using AntDeployAgentWindows.Model;
+using AntDeployAgentWindows.MyApp.Service;
+using AntDeployAgentWindows.Operation;
 using AntDeployAgentWindows.Operation.OperationTypes;
+using AntDeployAgentWindows.Util;
+using AntDeployAgentWindows.WebApiCore;
 
 namespace AntDeployAgent.MyApp.Service.Impl
 {

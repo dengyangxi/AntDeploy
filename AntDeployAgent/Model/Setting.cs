@@ -10,58 +10,15 @@ namespace AntDeployAgentWindows.Model
 {
     public class Setting
     {
-        //private static readonly System.Threading.Timer mDetectionTimer;
-        private static readonly int _clearOldPublishFolderOverDays = 10;
-        private static readonly int _oldPulishLimit = 10;
-        public static readonly int BackUpLimit = 10;
-        private static readonly List<string> MacWhiteList = new List<string>();
         /// <summary>
-        /// 是否开启备份
+        /// 备份保留个数（热加载：读取 <see cref="AgentConfigLoader.Current"/>；BackUpLimit&lt;=0 时取发布历史保留个数）。
         /// </summary>
-        /// <returns></returns>
-        public static readonly bool NeedBackUp = true;
-        static Setting()
-        {
-            //#if DEBUG
-            //             mDetectionTimer = new System.Threading.Timer(OnVerify, null, 1000 * 5, 1000 * 5);
-            //#else
-            //             mDetectionTimer = new System.Threading.Timer(OnVerify, null, 1000 * 60 * 30, 1000 * 60 * 30);
-            //#endif
+        public static int BackUpLimit => AgentConfigLoader.Current.EffectiveBackUpLimit;
 
-            var oldPulishLimit = System.Configuration.ConfigurationManager.AppSettings["OldPulishLimit"];
-            if (int.TryParse(oldPulishLimit, out int value1))
-            {
-                _oldPulishLimit = value1 < 1 ? 1 : value1;
-            }
-
-            var clearOldPublishFolderOverDaysStr = System.Configuration.ConfigurationManager.AppSettings["ClearOldPublishFolderOverDays"];
-            if (int.TryParse(clearOldPublishFolderOverDaysStr, out int value))
-            {
-                _clearOldPublishFolderOverDays = value;
-            }
-
-            var _whiteMacList = System.Configuration.ConfigurationManager.AppSettings["MacWhiteList"];
-            if (!string.IsNullOrEmpty(_whiteMacList))
-            {
-                MacWhiteList = _whiteMacList.Split(',').Distinct().ToList();
-            }
-
-            var needBackUp = System.Configuration.ConfigurationManager.AppSettings["NeedBackUp"];
-            if (!string.IsNullOrEmpty(needBackUp) && needBackUp.ToLower().Equals("false"))
-            {
-                NeedBackUp = false;
-            }
-
-            var backuplimit = System.Configuration.ConfigurationManager.AppSettings["BackUpLimit"];
-            if (!string.IsNullOrEmpty(backuplimit))
-            {
-                int.TryParse(backuplimit, out BackUpLimit);
-            }
-            else
-            {
-                BackUpLimit = _oldPulishLimit;
-            }
-        }
+        /// <summary>
+        /// 是否开启备份（热加载：读取 <see cref="AgentConfigLoader.Current"/>）。
+        /// </summary>
+        public static bool NeedBackUp => AgentConfigLoader.Current.NeedBackUp;
 
 
         public static string WebRootPath = "";
@@ -235,13 +192,19 @@ namespace AntDeployAgentWindows.Model
 
                 if (!Directory.Exists(path)) return;
 
+                // 热加载：一次清理过程内使用同一份配置快照，避免中途变更导致判定不一致
+                var cfg = AgentConfigLoader.Current;
+                var oldPublishLimit = cfg.EffectiveOldPublishLimit;
+                var backupLimit = cfg.EffectiveBackUpLimit;
+                var clearDays = cfg.ClearOldPublishFolderOverDays;
+
                 var applicationFolders = !string.IsNullOrEmpty(projectFolder) ? new List<string> { Path.Combine(path, projectFolder) }.ToArray() : Directory.GetDirectories(path);
                 if (applicationFolders.Length < 1) return;
                 foreach (var applicationFolder in applicationFolders)
                 {
                     var subFolders = Directory.GetDirectories(applicationFolder);
                     logger?.Invoke($"found deploy folders:{subFolders.Length}->{applicationFolder}");
-                    var limits = (path.EndsWith("_backup") ? BackUpLimit : _oldPulishLimit);
+                    var limits = (path.EndsWith("_backup") ? backupLimit : oldPublishLimit);
                     if (subFolders.Length < limits)
                     {
                         logger?.Invoke($"config limit:{limits},ignore delete");
@@ -279,12 +242,12 @@ namespace AntDeployAgentWindows.Model
 
 
                     var targetList = oldFolderList.OrderByDescending(r => r.DateTime)
-                        .Where(r => r.DiffDays >= _clearOldPublishFolderOverDays)
+                        .Where(r => r.DiffDays >= clearDays)
                         .ToList();
                     
-                    logger?.Invoke($"deploy folders count:{oldFolderList.Count}, overDays({_clearOldPublishFolderOverDays}) folders count:{targetList.Count}, limit:{limits}");
+                    logger?.Invoke($"deploy folders count:{oldFolderList.Count}, overDays({clearDays}) folders count:{targetList.Count}, limit:{limits}");
                     var diff = subFolders.Length - targetList.Count;
-                    var oldLimit = (path.EndsWith("_backup") ? BackUpLimit : _oldPulishLimit);
+                    var oldLimit = (path.EndsWith("_backup") ? backupLimit : oldPublishLimit);
                     if (diff >= 0 && diff < oldLimit)
                     {
                         targetList = targetList.Skip(oldLimit - diff).ToList();
@@ -332,9 +295,10 @@ namespace AntDeployAgentWindows.Model
         /// <returns></returns>
         public static bool CheckIsInWhiteMacList(string macAddress)
         {
-            if (!MacWhiteList.Any()) return true;
+            var whiteList = AgentConfigLoader.Current.MacWhiteListItems;
+            if (!whiteList.Any()) return true;
 
-            return MacWhiteList.Contains(macAddress);
+            return whiteList.Contains(macAddress);
         }
 
     }

@@ -1,0 +1,1092 @@
+@page "/project/{Id}"
+@attribute [Authorize]
+@implements IDisposable
+@using AntDeploy.Core.Util
+@inject IConfigStore Store
+@inject DeployService Deploy
+@inject DeploySessionManager SessionManager
+@inject CurrentUserService CurrentUser
+@inject NavigationManager Nav
+@inject MessageService Message
+@inject ProjectDeployOptionsService DeployOptions
+
+@if (_profile == null)
+{
+    <Empty Description="@("项目不存在")" />
+}
+else
+{
+    <div class="detail-header">
+        <div style="min-width:0;">
+            <div class="page-title" style="margin-bottom:0;">
+                <Input @bind-Value="_profile.Name" Disabled="@(!_canEdit)" Style="width:280px;font-weight:600;" />
+            </div>
+            <div class="detail-header__meta">
+                @if (!string.IsNullOrWhiteSpace(_profile.Git.RepositoryUrl))
+                {
+                    <span class="chip"><span class="chip__k">Git</span><span class="chip__v">@_profile.Git.RepositoryUrl</span></span>
+                }
+                @if (!string.IsNullOrWhiteSpace(_profile.Git.Branch))
+                {
+                    <span class="chip chip--brand"><span class="chip__k">分支</span><span class="chip__v">@_profile.Git.Branch</span></span>
+                }
+            </div>
+        </div>
+        <Space>
+            <SpaceItem><Button Icon="arrow-left" OnClick="@(() => Nav.NavigateTo("/projects"))">返回</Button></SpaceItem>
+            @if (_canEdit)
+            {
+                <SpaceItem><Button Type="ButtonType.Primary" Icon="save" OnClick="Save">保存配置</Button></SpaceItem>
+            }
+            else
+            {
+                <SpaceItem><span class="form-hint" style="margin:0;">只读：普通用户仅可发布，无配置权限</span></SpaceItem>
+            }
+        </Space>
+    </div>
+
+    <Tabs @bind-ActiveKey="_activeTab">
+        <TabPane Key="git" Tab="Git 代码">
+            <div class="form-grid">
+                <div class="form-item">
+                    <div class="form-label">仓库地址 RepositoryUrl</div>
+                    <Input @bind-Value="_profile.Git.RepositoryUrl" Placeholder="https://github.com/xxx/yyy.git" />
+                </div>
+                <div class="form-item">
+                    <div class="form-label">分支 Branch（可下拉选择 / 手工输入 / 模糊搜索）</div>
+                    <BranchPicker @ref="_branchPicker"
+                                  RepositoryUrl="@_profile.Git.RepositoryUrl"
+                                  UserName="@_profile.Git.UserName"
+                                  Password="@_profile.Git.Password"
+                                  Value="@_profile.Git.Branch"
+                                  ValueChanged="@(v => _profile.Git.Branch = v)"
+                                  DefaultValue="@(_profile.LastPublishBranch ?? _profile.Git.Branch)"
+                                  Disabled="@(!_canEdit)"
+                                  ListId="detail-branch-list"
+                                  Placeholder="选择或输入分支，支持模糊搜索" />
+                </div>
+                <div class="form-item">
+                    <div class="form-label">用户名 UserName</div>
+                    <Input @bind-Value="_profile.Git.UserName" />
+                </div>
+                <div class="form-item">
+                    <div class="form-label">密码 / 令牌 Password</div>
+                    <InputPassword @bind-Value="_profile.Git.Password" />
+                </div>
+            </div>
+            <Alert Style="margin-top:12px;" Type="AlertType.Info" ShowIcon="true"
+                   Message="@("开启二要素(2FA)时，密码位置请填写 Personal Access Token(PAT)")" />
+            <div style="margin-top:12px;">
+                <Checkbox @bind-Checked="_profile.Git.UseLocalPath">使用本地已有目录（不执行 clone/pull）</Checkbox>
+            </div>
+            <div class="form-hint">本地代码目录：@Store.GetProjectPath(_profile)</div>
+            <Space Style="margin-top:12px;">
+                <SpaceItem><Button Disabled="@(_busy || _running)" OnClick="TestConnection">测试连接</Button></SpaceItem>
+                <SpaceItem><Button Disabled="@(_busy || _running)" OnClick="ReloadBranches">拉取分支</Button></SpaceItem>
+                <SpaceItem><Button Type="ButtonType.Primary" Disabled="@(!_canOperate || _busy || _running)" OnClick="Pull">拉取代码</Button></SpaceItem>
+                <SpaceItem><Button Danger="true" Disabled="@(!_running)" OnClick="Cancel">停止</Button></SpaceItem>
+            </Space>
+        </TabPane>
+
+        <TabPane Key="build" Tab="编译发布">
+            <div class="form-grid">
+                <div class="form-item" style="grid-column:1 / -1;">
+                    <div class="form-label">项目文件 ProjectFile（多项目仓库请指定要发布的 Web 主项目，留空则自动探测）</div>
+                    <select class="native-select" value="@_profile.Build.ProjectFile" @onchange="OnProjectFileChange">
+                        <option value="">（自动探测）</option>
+                        @foreach (var p in _projectFiles)
+                        {
+                            <option value="@p">@p</option>
+                        }
+                    </select>
+                </div>
+                <div class="form-item">
+                    <div class="form-label">项目类型 SdkType</div>
+                    <select class="native-select" value="@_profile.Build.SdkType" @onchange="OnSdkTypeChange">
+                        @foreach (var s in _sdkTypes)
+                        {
+                            <option value="@s">@s</option>
+                        }
+                    </select>
+                </div>
+                <div class="form-item">
+                    <div class="form-label">配置 Configuration</div>
+                    <Input @bind-Value="_profile.Build.Configuration" Placeholder="Release" />
+                </div>
+                <div class="form-item">
+                    <div class="form-label">目标框架 Framework（可选）</div>
+                    <Input @bind-Value="_profile.Build.Framework" Placeholder="如 net8.0 / net472" />
+                </div>
+                <div class="form-item">
+                    <div class="form-label">运行时 Runtime（可选）</div>
+                    <Input @bind-Value="_profile.Build.Runtime" Placeholder="如 win-x64 / linux-x64" />
+                </div>
+                <div class="form-item">
+                    <div class="form-label">发布模式 NetCorePublishMode</div>
+                    <select class="native-select" value="@_profile.Plugin.NetCorePublishMode" @onchange="OnPublishModeChange">
+                        @foreach (var m in _publishModes)
+                        {
+                            <option value="@m">@m</option>
+                        }
+                    </select>
+                </div>
+                <div class="form-item">
+                    <div class="form-label">额外参数 ExtraArgs（可选）</div>
+                    <Input @bind-Value="_profile.Build.ExtraArgs" Placeholder="如 --self-contained false" />
+                </div>
+                <div class="form-item" style="grid-column:1 / -1;">
+                    <div class="form-label">发布输出目录 PublishPath（可选）</div>
+                    <Input @bind-Value="_profile.Build.PublishPath" Placeholder="留空则使用默认目录" />
+                </div>
+            </div>
+            <div style="margin-top:12px;">
+                <Checkbox @bind-Checked="_profile.Build.IsWeb">Web 项目（IsWeb）</Checkbox>
+            </div>
+            <div class="form-hint">发布输出目录：@Store.GetPublishPath(_profile)</div>
+            <Space Style="margin-top:12px;">
+                <SpaceItem><Button Type="ButtonType.Primary" Disabled="@(!_canOperate || _running)" OnClick="Build">编译发布</Button></SpaceItem>
+                <SpaceItem><Button Disabled="@(!_canOperate || _running)" OnClick="RunPullAndBuild">拉取并编译</Button></SpaceItem>
+                <SpaceItem><Button Danger="true" Disabled="@(!_running)" OnClick="Cancel">取消</Button></SpaceItem>
+            </Space>
+        </TabPane>
+
+        <TabPane Key="env" Tab="环境与服务器">
+            <div class="server-row">
+                <span class="form-label" style="margin:0;">当前环境</span>
+                <select class="native-select" style="width:220px;" value="@_envName" @onchange="OnEnvChange">
+                    @foreach (var e in _profile.Envs)
+                    {
+                        <option value="@e.Name">@e.Name</option>
+                    }
+                </select>
+                <Button Size="ButtonSize.Small" Disabled="@(!_canEdit)" OnClick="AddEnv">新增环境</Button>
+                <Button Size="ButtonSize.Small" Danger="true" Disabled="@(!_canEdit || _profile.Envs.Count == 0)" OnClick="RemoveEnv">删除环境</Button>
+            </div>
+
+            @if (_currentEnv == null)
+            {
+                <Empty Description="@("暂无环境，请先新增环境")" />
+            }
+            else
+            {
+                <div class="form-item" style="max-width:320px;margin-top:8px;">
+                    <div class="form-label">环境名称</div>
+                    <Input @bind-Value="_currentEnv.Name" Placeholder="如 prod / test" />
+                </div>
+
+                <Divider>Agent 服务器列表（HTTP：IIS / Windows / Linux / Docker）</Divider>
+                @foreach (var srv in _currentEnv.ServerList)
+                {
+                    <div class="server-row">
+                        <Input @bind-Value="srv.NickName" Disabled="@(!_canEdit)" Placeholder="昵称" Style="width:120px;" />
+                        <Input @bind-Value="srv.Host" Disabled="@(!_canEdit)" Placeholder="http://192.168.1.10:5000" Style="width:280px;" />
+                        <InputPassword @bind-Value="srv.Token" Disabled="@(!_canEdit)" Placeholder="Token"  />
+                        <Button Size="ButtonSize.Small" OnClick="@(() => TestAgentServer(srv))">测试</Button>
+                        <Button Size="ButtonSize.Small" Danger="true" Disabled="@(!_canEdit)" OnClick="@(() => RemoveServer(srv))">移除</Button>
+                    </div>
+                }
+                <Button Size="ButtonSize.Small" Disabled="@(!_canEdit)" OnClick="AddServer" Style="margin-top:6px;">+ 添加 Agent 服务器</Button>
+
+                <Divider>SSH 服务器列表（Linux 上的 Docker 直连部署）</Divider>
+                @foreach (var ls in _currentEnv.LinuxServerList)
+                {
+                    <div class="server-row">
+                        <Input @bind-Value="ls.NickName" Disabled="@(!_canEdit)" Placeholder="昵称" Style="width:120px;" />
+                        <Input @bind-Value="ls.Host" Disabled="@(!_canEdit)" Placeholder="192.168.1.20:22" Style="width:220px;" />
+                        <Input @bind-Value="ls.UserName" Disabled="@(!_canEdit)" Placeholder="用户名" Style="width:140px;" />
+                        <InputPassword @bind-Value="ls.Pwd" Disabled="@(!_canEdit)" Placeholder="密码"   />
+                        <Button Size="ButtonSize.Small" OnClick="@(() => TestSsh(ls))">测试</Button>
+                        <Button Size="ButtonSize.Small" Danger="true" Disabled="@(!_canEdit)" OnClick="@(() => RemoveLinuxServer(ls))">移除</Button>
+                    </div>
+                }
+                <Button Size="ButtonSize.Small" Disabled="@(!_canEdit)" OnClick="AddLinuxServer" Style="margin-top:6px;">+ 添加 SSH 服务器</Button>
+
+                <Divider>打包忽略列表（zip 打包时跳过）</Divider>
+                <details class="ignore-help">
+                    <summary>设置说明与示例（点击展开）</summary>
+                    <div class="ignore-help__body">
+                        <p><b>匹配规则：</b>对「相对发布根目录的路径（用 <code>/</code> 分隔）」做<b>不区分大小写</b>的<b>子串包含</b>匹配，命中即跳过。<b>不支持通配符</b>，直接填写要忽略的路径片段即可。</p>
+                        <p><b>示例：</b></p>
+                        <ul>
+                            <li>忽略根目录 <code>Web.config</code>（及任意层级同名文件）：填 <code>Web.config</code></li>
+                            <li>忽略整个 <code>Logs</code> 目录：填 <code>Logs/</code></li>
+                            <li>忽略所有 pdb 文件：填 <code>.pdb</code>（注意不是 <code>*.pdb</code>，子串匹配无需星号）</li>
+                            <li>只忽略子目录中的 <code>Web.config</code>、保留根目录的：填 <code>/Web.config</code></li>
+                        </ul>
+                        <p><b>是否区分大小写：</b>不区分（<code>web.config</code>、<code>Web.CONFIG</code> 均会被忽略）。</p>
+                    </div>
+                </details>
+                <ListEditor Value="_currentEnv.IgnoreList" Placeholder="如 .pdb / Logs/ / Web.config" AddText="添加忽略项" />
+
+                <Divider>备份忽略列表（Agent 备份旧版本时跳过）</Divider>
+                <details class="ignore-help">
+                    <summary>设置说明与示例（点击展开）</summary>
+                    <div class="ignore-help__body">
+                        <p><b>匹配规则（IIS / Windows 服务）：</b>对「相对路径（用 <code>/</code> 分隔）」做<b>不区分大小写</b>匹配，支持两种写法：</p>
+                        <ul>
+                            <li>以 <code>*</code> 开头：按<b>后缀</b>匹配，如 <code>*.pdb</code> 忽略所有 pdb、<code>*.log</code> 忽略所有日志；</li>
+                            <li>其它写法：按<b>正则表达式</b>匹配（不区分大小写），如 <code>Web\.config</code>、<code>Logs/</code>。</li>
+                        </ul>
+                        <p><b>示例：</b></p>
+                        <ul>
+                            <li>忽略根目录 <code>Web.config</code>：填 <code>Web\.config</code>（正则中 <code>.</code> 需转义）</li>
+                            <li>忽略整个 <code>Logs</code> 目录：填 <code>Logs/</code></li>
+                            <li>忽略所有 pdb：填 <code>*.pdb</code></li>
+                        </ul>
+                        <p><b>是否区分大小写：</b>IIS / Windows 服务不区分；<b>Docker / Linux 服务</b>的备份由服务器端 <code>rsync --exclude-from</code> 执行，规则为 rsync 排除语法（<b>区分大小写</b>、支持 glob），如 <code>Logs/</code>、<code>*.pdb</code>。</p>
+                    </div>
+                </details>
+                <ListEditor Value="_currentEnv.WindowsBackUpIgnoreList" Placeholder="如 *.pdb / Logs/ / Web\.config" AddText="添加备份忽略项" />
+            }
+        </TabPane>
+
+        <TabPane Key="deploy" Tab="部署回滚">
+            <div class="form-grid">
+                <div class="form-item">
+                    <div class="form-label">部署类型</div>
+                    <select class="native-select" value="@_deployType" @onchange="OnDeployTypeChange">
+                        @foreach (var t in _deployTypes)
+                        {
+                            <option value="@t">@t</option>
+                        }
+                    </select>
+                </div>
+                @if (_deployType == "docker")
+                {
+                    <div class="form-item">
+                        <div class="form-label">部署通道</div>
+                        <div style="display:flex;gap:16px;align-items:center;height:32px;">
+                            <label><input type="radio" name="dchannel" checked="@(!_dockerUseSsh)" @onchange="@(() => SetDockerChannel(false))" /> Agent(HTTP)</label>
+                            <label><input type="radio" name="dchannel" checked="@_dockerUseSsh" @onchange="@(() => SetDockerChannel(true))" /> SSH 直连</label>
+                        </div>
+                    </div>
+                }
+                <div class="form-item" style="grid-column:1 / -1;">
+                    <div class="form-label">目标服务器（默认全选，可勾选一个或多个）</div>
+                    @if (_deployType == "docker" && _dockerUseSsh)
+                    {
+                        @if (_sshHosts.Count == 0)
+                        {
+                            <div class="form-hint">当前环境未配置 SSH 服务器，请到「环境与服务器」添加</div>
+                        }
+                        else
+                        {
+                            <Space Style="margin-bottom:6px;">
+                                <SpaceItem><Button Size="ButtonSize.Small" OnClick="SelectAllSsh">全选</Button></SpaceItem>
+                                <SpaceItem><Button Size="ButtonSize.Small" OnClick="ClearSsh">清空</Button></SpaceItem>
+                                <SpaceItem><span class="form-hint" style="margin:0;">已选 @_selectedSshHosts.Count / @_sshHosts.Count</span></SpaceItem>
+                            </Space>
+                            <div style="max-height:180px;overflow-y:auto;border:1px solid #eee;border-radius:4px;padding:8px;">
+                                @foreach (var h in _sshHosts)
+                                {
+                                    var host = h;
+                                    <div><Checkbox Checked="_selectedSshHosts.Contains(host)" CheckedChanged="@(v => ToggleSshHost(host, v))">@host</Checkbox></div>
+                                }
+                            </div>
+                        }
+                    }
+                    else
+                    {
+                        @if (_serverHosts.Count == 0)
+                        {
+                            <div class="form-hint">当前环境未配置 Agent 服务器，请到「环境与服务器」添加</div>
+                        }
+                        else
+                        {
+                            <Space Style="margin-bottom:6px;">
+                                <SpaceItem><Button Size="ButtonSize.Small" OnClick="SelectAllServers">全选</Button></SpaceItem>
+                                <SpaceItem><Button Size="ButtonSize.Small" OnClick="ClearServers">清空</Button></SpaceItem>
+                                <SpaceItem><span class="form-hint" style="margin:0;">已选 @_selectedServerHosts.Count / @_serverHosts.Count</span></SpaceItem>
+                            </Space>
+                            <div style="max-height:180px;overflow-y:auto;border:1px solid #eee;border-radius:4px;padding:8px;">
+                                @foreach (var h in _serverHosts)
+                                {
+                                    var host = h;
+                                    <div><Checkbox Checked="_selectedServerHosts.Contains(host)" CheckedChanged="@(v => ToggleServerHost(host, v))">@host</Checkbox></div>
+                                }
+                            </div>
+                        }
+                    }
+                </div>
+                <div class="form-item" style="grid-column:1 / -1;">
+                    <div class="form-label">并发设置（同时上传 / 同时发布更新的服务器数量）</div>
+                    <div style="display:flex;gap:24px;flex-wrap:wrap;align-items:center;">
+                        <span style="display:inline-flex;align-items:center;gap:6px;">
+                            上传并发
+                            <select class="native-select" style="width:110px;" value="@_uploadMode" @onchange="OnUploadModeChange" disabled="@(!_canEdit)">
+                                <option value="count">数量</option>
+                                <option value="percent">百分比</option>
+                            </select>
+                            <AntDesign.InputNumber TValue="int" @bind-Value="_uploadValue" Min="1" Max="9999" Disabled="@(!_canEdit)" Style="width:100px;" />
+                        </span>
+                        <span style="display:inline-flex;align-items:center;gap:6px;">
+                            部署并发
+                            <select class="native-select" style="width:110px;" value="@_deployMode" @onchange="OnDeployModeChange" disabled="@(!_canEdit)">
+                                <option value="count">数量</option>
+                                <option value="percent">百分比</option>
+                            </select>
+                            <AntDesign.InputNumber TValue="int" @bind-Value="_deployValue" Min="1" Max="9999" Disabled="@(!_canEdit)" Style="width:100px;" />
+                        </span>
+                    </div>
+                    <div class="form-hint">实际并发 = 上传与部署并发的较小值；百分比按本次选中服务器数向上取整；1 表示逐台顺序发布。修改后点「保存配置」生效。</div>
+                    @if (ShowRedRisk)
+                    {
+                        <div class="form-hint" style="color:#cf1322;font-weight:600;">高风险：部署并发 @(DeployEffectiveParallel) 台（已选中 @(SelectedServerCount) 台），多台将同时下线更新，可能丢失在途请求@(string.IsNullOrWhiteSpace(_beforeCallbackUrl) ? "" : "；且已配置更新前下负载回调，多台同时摘除会放大掉包风险")。零掉包建议：部署并发设为 1（滚动发布），并勾选下方「先全部上传再部署」+ 配置下/上负载回调。</div>
+                    }
+                    else if (ShowAmberRisk)
+                    {
+                        <div class="form-hint" style="color:#d48806;">注意：部署并发 @(DeployEffectiveParallel) 台（大于 1），多台将同时更新，这些节点会在同一时刻短暂不可用；如需零掉包请把部署并发设为 1（滚动发布）。</div>
+                    }
+                </div>
+                <div class="form-item" style="grid-column:1 / -1;">
+                    <div class="form-label">发布回调（选填，零掉包）— 更新前下负载、更新成功后上负载</div>
+                    <div style="display:flex;gap:24px;flex-wrap:wrap;align-items:flex-start;">
+                        <span style="display:inline-flex;flex-direction:column;gap:4px;min-width:300px;">
+                            <span>更新前调用（下负载）</span>
+                            <Input @bind-Value="_beforeCallbackUrl" Disabled="@(!_canEdit)" Placeholder="http(s)://... 或以 / 开头（Agent 调本机站点端口）" />
+                        </span>
+                        <span style="display:inline-flex;flex-direction:column;gap:4px;min-width:300px;">
+                            <span>更新成功后调用（上负载）</span>
+                            <Input @bind-Value="_afterCallbackUrl" Disabled="@(!_canEdit)" Placeholder="http(s)://... 或以 / 开头（Agent 调本机站点端口）" />
+                        </span>
+                        <span style="display:inline-flex;align-items:center;gap:6px;">
+                            调用后等待秒数
+                            <AntDesign.InputNumber TValue="int" @bind-Value="_drainWaitSeconds" Min="0" Max="3600" Disabled="@(!_canEdit)" Style="width:100px;" />
+                        </span>
+                        <span style="display:inline-flex;align-items:center;gap:6px;">
+                            回调超时秒数
+                            <AntDesign.InputNumber TValue="int" @bind-Value="_callbackTimeoutSeconds" Min="1" Max="300" Disabled="@(!_canEdit)" Style="width:100px;" />
+                        </span>
+                    </div>
+                    <div class="form-hint">完整 http(s):// 由 Agent 直接调用；以 / 开头则由 Agent 调本机 127.0.0.1 的站点端口（仅 IIS 能自动解析端口）。「调用后等待秒数」用于下负载后等待在途请求处理完再更新站点。留空即不回调。需 Agent 版本 ≥ 7.2，否则回调不生效。</div>
+                    @if (_deployType == "iis")
+                    {
+                        <div style="margin-top:10px;">
+                            <Checkbox @bind-Checked="_enableTwoPhase" Disabled="@(!_canEdit)">先全部上传到所有服务器，再开始部署（两阶段，推荐用于零掉包滚动发布）</Checkbox>
+                            <div class="form-hint">阶段1 并行把包上传解压到所有服务器（站点保持运行）；阶段2 逐台部署（部署并发=1 即滚动，配合下/上负载回调可做到零掉包）。仅 IIS 类型支持；需 Agent 版本 ≥ 7.2，否则发布时自动降级为原子发布并告警。</div>
+                        </div>
+                    }
+                </div>
+                <div class="form-item">
+                    <div class="form-label">部署备注 Remark（可选）</div>
+                    <Input @bind-Value="_remark" Placeholder="本次部署说明" />
+                </div>
+            </div>
+
+            <DeployTypeConfig Profile="@_profile" Type="@_deployType" />
+
+            @if (SelectEnabled)
+            {
+                <Divider>选择要部署的文件</Divider>
+                <Space Style="margin-bottom:8px;">
+                    <SpaceItem><Button Size="ButtonSize.Small" OnClick="LoadFilesForSelect">刷新文件列表</Button></SpaceItem>
+                    <SpaceItem><Button Size="ButtonSize.Small" OnClick="SelectAllFiles">全选</Button></SpaceItem>
+                    <SpaceItem><Button Size="ButtonSize.Small" OnClick="ClearSelectedFiles">清空</Button></SpaceItem>
+                    <SpaceItem><span class="form-hint" style="margin:0;">已选 @_selectedFiles.Count / @_allFiles.Count</span></SpaceItem>
+                </Space>
+                <div style="max-height:220px;overflow-y:auto;border:1px solid #eee;border-radius:4px;padding:8px;">
+                    @foreach (var f in _allFiles)
+                    {
+                        var file = f;
+                        <div>
+                            <Checkbox Checked="_selectedFiles.Contains(file)" CheckedChanged="@(v => ToggleFile(file, v))">@file</Checkbox>
+                        </div>
+                    }
+                </div>
+            }
+
+            <Space Style="margin-top:16px;">
+                <SpaceItem><Button Type="ButtonType.Primary" Disabled="@(!_canOperate || _running)" OnClick="DoDeploy">发布</Button></SpaceItem>
+                @if (_deployType == "docker")
+                {
+                    <SpaceItem><Button Disabled="@(!_canOperate || _running)" OnClick="DoBuildImage">构建镜像(jib)</Button></SpaceItem>
+                }
+                <SpaceItem><Button Danger="true" Disabled="@(!_running)" OnClick="Cancel">停止</Button></SpaceItem>
+                <SpaceItem><Button Disabled="@(_running || _session == null)" OnClick="Retry">重试</Button></SpaceItem>
+            </Space>
+
+            <Divider>版本历史与回滚</Divider>
+            <Space>
+                <SpaceItem><Button Size="ButtonSize.Small" Disabled="@(_busy || _running)" OnClick="LoadHistory">拉取历史版本</Button></SpaceItem>
+                <SpaceItem>
+                    <select class="native-select" style="width:320px;" value="@_rollbackVersion" @onchange="OnRollbackVersionChange">
+                        <option value=""></option>
+                        @foreach (var h in _history)
+                        {
+                            <option value="@h.Version">@h.Label</option>
+                        }
+                    </select>
+                </SpaceItem>
+                <SpaceItem><Button Disabled="@(_running || string.IsNullOrEmpty(_rollbackVersion))" OnClick="DoRollback">回滚</Button></SpaceItem>
+            </Space>
+            @if (!string.IsNullOrEmpty(_currentVersionHint))
+            {
+                <div class="form-hint">当前版本：@_currentVersionHint</div>
+            }
+        </TabPane>
+    </Tabs>
+
+    <DeployLogConsole Lines="LogLines"
+                      Live="_running"
+                      SubHeader="@LogSubHeader"
+                      ContainerStyle="margin-top:20px;">
+        <Actions>
+            <Button Size="ButtonSize.Small" OnClick="RefreshSession">刷新</Button>
+        </Actions>
+    </DeployLogConsole>
+}
+
+@code {
+    [Parameter] public string Id { get; set; } = string.Empty;
+
+    /// <summary>查询参数 ?tab=deploy 用于从项目列表「去填写」直达部署回滚页并展示 IIS 配置。</summary>
+    [SupplyParameterFromQuery(Name = "tab")]
+    public string? Tab { get; set; }
+
+    private DeployProfile? _profile;
+    private string _activeTab = "git";
+    private bool _busy;                 // 本地瞬时操作（测试连接 / 拉取历史 / 扫描文件）
+    private BranchPicker? _branchPicker;
+
+    // 共享会话（跨用户/刷新持久化）：按钮态、进度、实时日志均来自此对象
+    private DeploySession? _session;
+    private int _renderQueued;
+
+    private bool _canEdit;              // 是否可编辑配置（超管 / 本团队团队管理员）
+    private bool _canOperate;           // 是否可执行发布类操作（可见即可发布）
+
+    private List<string> _projectFiles = new();
+    private readonly string[] _sdkTypes = { "netcore", "framework" };
+    private readonly string[] _deployTypes = { "iis", "windowservice", "linux", "docker" };
+    private readonly string[] _publishModes =
+    {
+        "FDD", "win-x64(runtime)", "win-x86(runtime)", "linux-x64(runtime)", "osx-x64(runtime)"
+    };
+
+    private string _envName = string.Empty;
+    private Env? _currentEnv;
+
+    private string _deployType = "iis";
+    private List<string> _serverHosts = new();
+    private readonly HashSet<string> _selectedServerHosts = new();
+    private readonly HashSet<string> _knownServerHosts = new();
+
+    private bool _dockerUseSsh;
+    private List<string> _sshHosts = new();
+    private readonly HashSet<string> _selectedSshHosts = new();
+    private readonly HashSet<string> _knownSshHosts = new();
+
+    private string _remark = string.Empty;
+    private List<string> _allFiles = new();
+    private readonly HashSet<string> _selectedFiles = new();
+
+    // 并发发布设置（项目级，存 Web 端 DeployOptions 表；实际并发 = min(上传, 部署)，钳制 [1, 选中服务器数]）
+    private string _uploadMode = "count";
+    private int _uploadValue = 1;
+    private string _deployMode = "count";
+    private int _deployValue = 1;
+
+    // 零掉包回调 + 两阶段设置（项目级，存 Web 端 DeployOptions 表；需 Agent ≥ 7.2，旧 Agent 自动降级/忽略）
+    private string _beforeCallbackUrl = string.Empty;
+    private string _afterCallbackUrl = string.Empty;
+    private int _drainWaitSeconds = 0;
+    private int _callbackTimeoutSeconds = 10;
+    private bool _enableTwoPhase = false;
+
+    /// <summary>本次选中的目标服务器数（用于并发风险提示）。</summary>
+    private int SelectedServerCount => _selectedServerHosts.Count;
+
+    /// <summary>部署阶段有效并发（按选中服务器数解析百分比并钳制），用于风险提示。</summary>
+    private int DeployEffectiveParallel =>
+        ProjectDeployOptionsService.ResolveDeployParallel(
+            new DeployOptionsEntity { DeployMode = _deployMode, DeployValue = _deployValue }, SelectedServerCount);
+
+    /// <summary>红色高风险：部署并发 ≥ max(2, 服务器数一半)，或（配置了下负载回调且并发 &gt; 1）。</summary>
+    private bool ShowRedRisk
+    {
+        get
+        {
+            if (SelectedServerCount <= 1) return false;
+            var eff = DeployEffectiveParallel;
+            var threshold = Math.Max(2, (int)Math.Ceiling(SelectedServerCount * 0.5));
+            var hasBefore = !string.IsNullOrWhiteSpace(_beforeCallbackUrl);
+            return eff >= threshold || (hasBefore && eff > 1);
+        }
+    }
+
+    /// <summary>琥珀提示：部署并发 &gt; 1（多台同时更新），但未达红色阈值。</summary>
+    private bool ShowAmberRisk => SelectedServerCount > 1 && DeployEffectiveParallel > 1 && !ShowRedRisk;
+
+    private List<HistoryItem> _history = new();
+    private string _rollbackVersion = string.Empty;
+    private string _currentVersionHint = string.Empty;
+
+    /// <summary>运行态来自共享会话（跨用户/刷新一致）。</summary>
+    private bool _running => _session?.IsRunning == true;
+
+    /// <summary>渲染线程安全地快照会话日志（后台线程在 LogLock 下追加）。</summary>
+    private List<LogEntry> LogLines
+    {
+        get
+        {
+            var s = _session;
+            if (s == null) return new List<LogEntry>();
+            lock (s.LogLock)
+            {
+                return s.Logs.ToList();
+            }
+        }
+    }
+
+    /// <summary>日志面板副标题（操作 · 状态 · 触发人）。</summary>
+    private string LogSubHeader => _session == null
+        ? string.Empty
+        : _session.OperationText + " · " + _session.StatusText
+          + (string.IsNullOrWhiteSpace(_session.TriggeredBy) ? "" : " · 触发人 " + _session.TriggeredBy);
+
+    private bool SelectEnabled => _deployType switch
+    {
+        "windowservice" => _profile?.WindowsService?.EnableSelectDeploy == true,
+        "linux" => _profile?.Linux?.EnableSelectDeploy == true,
+        "docker" => _profile?.Docker?.EnableSelectDeploy == true,
+        _ => _profile?.Iis?.EnableSelectDeploy == true
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        await CurrentUser.LoadAsync();
+        _canEdit = CurrentUser.CanEditProject(Id);
+        _canOperate = CurrentUser.CanPublishProject(Id);
+        _profile = Store.GetProfile(Id);
+        if (_profile == null) return;
+        if (!CurrentUser.CanAccessProject(Id))
+        {
+            _profile = null; // 无权访问：置空以显示「项目不存在」
+            return;
+        }
+        _currentEnv = _profile.Envs.FirstOrDefault();
+        _envName = _currentEnv?.Name ?? string.Empty;
+        RefreshServerHosts();
+        RefreshSshHosts();
+
+        // ?tab=deploy 直达部署回滚页，部署类型取最近使用（回退 iis），使 IIS 配置直接可见
+        if (string.Equals(Tab, "deploy", StringComparison.OrdinalIgnoreCase))
+        {
+            _activeTab = "deploy";
+            _deployType = DeploySessionManager.NormalizeDeployType(_profile.LastDeployType);
+        }
+
+        // 载入并发发布设置（未配置时服务返回默认 count=1，即逐台顺序发布）
+        var opt = DeployOptions.GetOptions(Id);
+        _uploadMode = opt.UploadMode;
+        _uploadValue = opt.UploadValue;
+        _deployMode = opt.DeployMode;
+        _deployValue = opt.DeployValue;
+        _beforeCallbackUrl = opt.BeforeCallbackUrl ?? string.Empty;
+        _afterCallbackUrl = opt.AfterCallbackUrl ?? string.Empty;
+        _drainWaitSeconds = opt.DrainWaitSeconds;
+        _callbackTimeoutSeconds = opt.CallbackTimeoutSeconds > 0 ? opt.CallbackTimeoutSeconds : 10;
+        _enableTwoPhase = opt.EnableTwoPhase;
+
+        // 载入该项目最近会话（运行中优先），订阅事件实现跨用户/刷新实时同步
+        _session = SessionManager.GetLatestSession(Id);
+        SessionManager.OnSessionUpdated += HandleSessionUpdated;
+    }
+
+    /// <summary>会话事件回调：仅处理本项目的会话，节流渲染（后台线程触发，须 InvokeAsync）。</summary>
+    private void HandleSessionUpdated(string sessionId, DeploySession session)
+    {
+        if (session.ProfileId != Id) return;
+        _ = InvokeAsync(() =>
+        {
+            _session = session;
+            if (System.Threading.Interlocked.CompareExchange(ref _renderQueued, 1, 0) == 0)
+            {
+                _ = Task.Delay(150).ContinueWith(_ => InvokeAsync(() =>
+                {
+                    System.Threading.Interlocked.Exchange(ref _renderQueued, 0);
+                    StateHasChanged();
+                }));
+            }
+        });
+    }
+
+    /// <summary>手动刷新：重新载入该项目最近会话。</summary>
+    private void RefreshSession()
+    {
+        _session = SessionManager.GetLatestSession(Id);
+        StateHasChanged();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // 首次渲染后扫描项目文件候选（分支由 BranchPicker 组件自行加载）
+        if (firstRender && _profile != null)
+        {
+            await LoadProjectFilesAsync();
+            StateHasChanged();
+        }
+    }
+
+    /// <summary>扫描本地仓库，刷新“项目文件”下拉候选（后台线程，避免阻塞电路）。</summary>
+    private async Task LoadProjectFilesAsync()
+    {
+        if (_profile == null) return;
+        var profile = _profile;
+        try
+        {
+            var list = await Task.Run(() => Deploy.ListProjectFiles(profile));
+            if (list != null) _projectFiles = list;
+        }
+        catch { }
+    }
+
+    // ---------------- 日志 ----------------
+    // 控制台仅展示共享会话日志（LogLines）；本地瞬时操作（测试连接 / SSH 测试）通过 Message 反馈。
+    private void TestLog(string msg) { /* no-op：测试结果用 Message 呈现，不写入共享会话 */ }
+
+    // ---------------- 保存 ----------------
+
+    private void Save()
+    {
+        if (_profile == null) return;
+        if (!_canEdit) { Message.Warning("无权保存该项目配置"); return; }
+        Store.UpdateProfile(_profile);
+        DeployOptions.SaveOptions(Id, _uploadMode, _uploadValue, _deployMode, _deployValue,
+            _beforeCallbackUrl, _afterCallbackUrl, _drainWaitSeconds, _callbackTimeoutSeconds, _enableTwoPhase);
+        Message.Success("配置已保存");
+    }
+
+    private void OnUploadModeChange(ChangeEventArgs e)
+    {
+        _uploadMode = e.Value?.ToString() == "percent" ? "percent" : "count";
+        if (_uploadMode == "percent" && _uploadValue > 100) _uploadValue = 100;
+    }
+
+    private void OnDeployModeChange(ChangeEventArgs e)
+    {
+        _deployMode = e.Value?.ToString() == "percent" ? "percent" : "count";
+        if (_deployMode == "percent" && _deployValue > 100) _deployValue = 100;
+    }
+
+    // ---------------- Git ----------------
+
+    private async Task TestConnection()
+    {
+        if (_profile == null) return;
+        _busy = true;
+        try
+        {
+            var profile = _profile;
+            var res = await Task.Run(() =>
+            {
+                var ok = Deploy.TestGitConnection(profile, out var err);
+                return new { ok, err };
+            });
+            if (res.ok) Message.Success("Git 连接成功");
+            else Message.Error("Git 连接失败：" + res.err);
+        }
+        finally { _busy = false; }
+    }
+
+    /// <summary>「拉取分支」按钮：触发 BranchPicker 组件重新加载远程分支。</summary>
+    private async Task ReloadBranches()
+    {
+        if (_branchPicker != null) await _branchPicker.ReloadAsync();
+    }
+
+    private void Pull()
+    {
+        if (_profile == null || !_canOperate) return;
+        if (_running) { Message.Warning("已有任务在进行中，请等待完成或先点击「停止」"); return; }
+        SessionManager.StartPull(_profile, CurrentUser.UserName);
+        Message.Info("拉取代码已启动，可在下方实时日志查看进度");
+    }
+
+    // ---------------- Build ----------------
+
+    private void OnSdkTypeChange(ChangeEventArgs e)
+    {
+        if (_profile != null) _profile.Build.SdkType = e.Value?.ToString() ?? "netcore";
+    }
+
+    private void OnProjectFileChange(ChangeEventArgs e)
+    {
+        if (_profile != null)
+        {
+            var v = e.Value?.ToString();
+            _profile.Build.ProjectFile = string.IsNullOrWhiteSpace(v) ? null : v;
+        }
+    }
+
+    private void OnPublishModeChange(ChangeEventArgs e)
+    {
+        if (_profile != null) _profile.Plugin.NetCorePublishMode = e.Value?.ToString() ?? string.Empty;
+    }
+
+    private void Build()
+    {
+        if (_profile == null || !_canOperate) return;
+        if (_running) { Message.Warning("已有任务在进行中，请等待完成或先点击「停止」"); return; }
+        SessionManager.StartBuild(_profile, CurrentUser.UserName);
+        Message.Info("编译发布已启动");
+    }
+
+    private void RunPullAndBuild()
+    {
+        if (_profile == null || !_canOperate) return;
+        if (_running) { Message.Warning("已有任务在进行中，请等待完成或先点击「停止」"); return; }
+        SessionManager.StartPullAndBuild(_profile, CurrentUser.UserName);
+        Message.Info("拉取并编译已启动");
+    }
+
+    // ---------------- Env / Server ----------------
+
+    private void OnEnvChange(ChangeEventArgs e)
+    {
+        _envName = e.Value?.ToString() ?? string.Empty;
+        _currentEnv = _profile?.Envs.FirstOrDefault(x => x.Name == _envName);
+        ResetSelection();
+        RefreshServerHosts();
+        RefreshSshHosts();
+    }
+
+    private void AddEnv()
+    {
+        if (_profile == null) return;
+        var name = "env" + (_profile.Envs.Count + 1);
+        var env = new Env { Name = name };
+        env.ServerList.Add(new Server());
+        _profile.Envs.Add(env);
+        _currentEnv = env;
+        _envName = name;
+        ResetSelection();
+        RefreshServerHosts();
+        RefreshSshHosts();
+    }
+
+    private void RemoveEnv()
+    {
+        if (_profile == null || _currentEnv == null) return;
+        _profile.Envs.Remove(_currentEnv);
+        _currentEnv = _profile.Envs.FirstOrDefault();
+        _envName = _currentEnv?.Name ?? string.Empty;
+        ResetSelection();
+        RefreshServerHosts();
+        RefreshSshHosts();
+    }
+
+    private void AddServer()
+    {
+        if (_currentEnv == null) return;
+        _currentEnv.ServerList.Add(new Server());
+        RefreshServerHosts();
+    }
+
+    private void RemoveServer(Server srv)
+    {
+        if (_currentEnv == null) return;
+        _currentEnv.ServerList.Remove(srv);
+        RefreshServerHosts();
+    }
+
+    private void AddLinuxServer()
+    {
+        if (_currentEnv == null) return;
+        _currentEnv.LinuxServerList.Add(new LinuxServer());
+        RefreshSshHosts();
+    }
+
+    private void RemoveLinuxServer(LinuxServer ls)
+    {
+        if (_currentEnv == null) return;
+        _currentEnv.LinuxServerList.Remove(ls);
+        RefreshSshHosts();
+    }
+
+    private static string ServerDisplay(Server s) =>
+        string.IsNullOrWhiteSpace(s.NickName) ? s.Host : $"{s.NickName} ({s.Host})";
+
+    private static string SshDisplay(LinuxServer s) =>
+        string.IsNullOrWhiteSpace(s.NickName) ? s.Host : $"{s.NickName} ({s.Host})";
+
+    private void RefreshServerHosts()
+    {
+        _serverHosts = (_currentEnv?.ServerList ?? new List<Server>())
+            .Where(s => !string.IsNullOrWhiteSpace(s.Host))
+            .Select(ServerDisplay)
+            .ToList();
+        SyncSelection(_serverHosts, _selectedServerHosts, _knownServerHosts);
+    }
+
+    private void RefreshSshHosts()
+    {
+        _sshHosts = (_currentEnv?.LinuxServerList ?? new List<LinuxServer>())
+            .Where(s => !string.IsNullOrWhiteSpace(s.Host))
+            .Select(SshDisplay)
+            .ToList();
+        SyncSelection(_sshHosts, _selectedSshHosts, _knownSshHosts);
+    }
+
+    /// <summary>
+    /// 同步选择集：剔除已不存在的项；对“首次出现”的服务器默认勾选（实现默认全选），
+    /// 同时保留用户已有的勾选 / 取消勾选状态。
+    /// </summary>
+    private static void SyncSelection(List<string> hosts, HashSet<string> selected, HashSet<string> known)
+    {
+        var set = new HashSet<string>(hosts);
+        foreach (var h in selected.Where(x => !set.Contains(x)).ToList()) selected.Remove(h);
+        foreach (var h in known.Where(x => !set.Contains(x)).ToList()) known.Remove(h);
+        foreach (var h in hosts)
+        {
+            if (!known.Contains(h)) { known.Add(h); selected.Add(h); }
+        }
+    }
+
+    /// <summary>切换 / 增删环境时重置选择状态，使新环境默认全选。</summary>
+    private void ResetSelection()
+    {
+        _selectedServerHosts.Clear();
+        _knownServerHosts.Clear();
+        _selectedSshHosts.Clear();
+        _knownSshHosts.Clear();
+    }
+
+    private void ToggleServerHost(string host, bool check)
+    {
+        if (check) _selectedServerHosts.Add(host); else _selectedServerHosts.Remove(host);
+    }
+
+    private void SelectAllServers()
+    {
+        _selectedServerHosts.Clear();
+        foreach (var h in _serverHosts) _selectedServerHosts.Add(h);
+    }
+
+    private void ClearServers() => _selectedServerHosts.Clear();
+
+    private void ToggleSshHost(string host, bool check)
+    {
+        if (check) _selectedSshHosts.Add(host); else _selectedSshHosts.Remove(host);
+    }
+
+    private void SelectAllSsh()
+    {
+        _selectedSshHosts.Clear();
+        foreach (var h in _sshHosts) _selectedSshHosts.Add(h);
+    }
+
+    private void ClearSsh() => _selectedSshHosts.Clear();
+
+    /// <summary>按配置顺序解析出勾选的 Agent 服务器。</summary>
+    private List<Server> ResolveServers()
+    {
+        var list = new List<Server>();
+        if (_currentEnv == null) return list;
+        foreach (var s in _currentEnv.ServerList)
+        {
+            if (string.IsNullOrWhiteSpace(s.Host)) continue;
+            if (_selectedServerHosts.Contains(ServerDisplay(s))) list.Add(s);
+        }
+        return list;
+    }
+
+    /// <summary>按配置顺序解析出勾选的 SSH 服务器。</summary>
+    private List<LinuxServer> ResolveSshServers()
+    {
+        var list = new List<LinuxServer>();
+        if (_currentEnv == null) return list;
+        foreach (var s in _currentEnv.LinuxServerList)
+        {
+            if (string.IsNullOrWhiteSpace(s.Host)) continue;
+            if (_selectedSshHosts.Contains(SshDisplay(s))) list.Add(s);
+        }
+        return list;
+    }
+
+    private async Task TestAgentServer(Server srv)
+    {
+        var ok = await Deploy.TestAgentServerAsync(srv, GetCheckTarget(), GetCheckName(), TestLog);
+        if (ok) Message.Success("Agent 服务器可达");
+        else Message.Error("Agent 服务器不可达");
+    }
+
+    private void TestSsh(LinuxServer ls)
+    {
+        var ok = Deploy.TestSshServer(ls, TestLog);
+        if (ok) Message.Success("SSH 连接成功");
+        else Message.Error("SSH 连接失败");
+    }
+
+    // ---------------- Deploy ----------------
+
+    private void OnDeployTypeChange(ChangeEventArgs e)
+    {
+        _deployType = e.Value?.ToString() ?? "iis";
+        _allFiles.Clear();
+        _selectedFiles.Clear();
+    }
+
+    private void SetDockerChannel(bool useSsh)
+    {
+        _dockerUseSsh = useSsh;
+    }
+
+    private void OnRollbackVersionChange(ChangeEventArgs e) => _rollbackVersion = e.Value?.ToString() ?? string.Empty;
+
+    private string GetCheckTarget() => _deployType switch
+    {
+        "windowservice" => "checkwindowservice",
+        "linux" => "checklinux",
+        "docker" => "checkdocker",
+        _ => "checkiis"
+    };
+
+    private string GetCheckName() => _deployType switch
+    {
+        "windowservice" => _profile?.WindowsService?.ServiceName ?? string.Empty,
+        "linux" => _profile?.Linux?.ServiceName ?? string.Empty,
+        "docker" => _profile?.Docker?.TargetImage ?? string.Empty,
+        _ => _profile?.Iis?.WebSiteName ?? string.Empty
+    };
+
+    private void LoadFilesForSelect()
+    {
+        if (_profile == null) return;
+        _allFiles = Deploy.GetPublishFiles(_profile);
+        _selectedFiles.Clear();
+        Message.Success($"共 {_allFiles.Count} 个文件");
+    }
+
+    private void ToggleFile(string file, bool check)
+    {
+        if (check) _selectedFiles.Add(file);
+        else _selectedFiles.Remove(file);
+    }
+
+    private void SelectAllFiles()
+    {
+        _selectedFiles.Clear();
+        foreach (var f in _allFiles) _selectedFiles.Add(f);
+    }
+
+    private void ClearSelectedFiles() => _selectedFiles.Clear();
+
+    private void DoDeploy()
+    {
+        if (_profile == null || !_canOperate) return;
+        if (_running) { Message.Warning("已有任务在进行中，请等待完成或先点击「停止」"); return; }
+        // IIS 发布前拦截缺失 WebSiteName
+        if (_deployType == "iis" && string.IsNullOrWhiteSpace(_profile.Iis?.WebSiteName))
+        {
+            Message.Error("IIS 发布缺少必填项「网站名称(WebSiteName)」，请先在下方填写并保存配置");
+            return;
+        }
+        var selected = SelectEnabled ? _selectedFiles.ToList() : null;
+        var servers = ResolveServers();
+        var sshs = ResolveSshServers();
+        if (_deployType == "docker" && _dockerUseSsh)
+        {
+            if (sshs.Count == 0) { Message.Error("未选择 SSH 服务器"); return; }
+        }
+        else if (servers.Count == 0) { Message.Error("未选择目标服务器"); return; }
+
+        SessionManager.StartDetailDeploy(_profile, _currentEnv, servers, sshs, _deployType, _dockerUseSsh,
+            selected, _remark, CurrentUser.UserName);
+        Message.Info("发布已启动，可在下方实时日志查看进度");
+    }
+
+    private void DoBuildImage()
+    {
+        if (_profile == null || !_canOperate) return;
+        if (_running) { Message.Warning("已有任务在进行中，请等待完成或先点击「停止」"); return; }
+        SessionManager.StartBuildImage(_profile, CurrentUser.UserName);
+        Message.Info("镜像构建已启动");
+    }
+
+    private void DoRollback()
+    {
+        if (_profile == null || !_canOperate || string.IsNullOrEmpty(_rollbackVersion)) return;
+        if (_running) { Message.Warning("已有任务在进行中，请等待完成或先点击「停止」"); return; }
+        var servers = ResolveServers();
+        var sshs = ResolveSshServers();
+        if (_deployType == "docker" && _dockerUseSsh)
+        {
+            if (sshs.Count == 0) { Message.Error("未选择 SSH 服务器"); return; }
+        }
+        else if (servers.Count == 0) { Message.Error("未选择目标服务器"); return; }
+
+        SessionManager.StartRollback(_profile, _currentEnv, servers, sshs, _deployType, _dockerUseSsh,
+            _rollbackVersion, CurrentUser.UserName);
+        Message.Info("回滚已启动");
+    }
+
+    private async Task LoadHistory()
+    {
+        if (_profile == null) return;
+        _history.Clear();
+        _rollbackVersion = string.Empty;
+        _currentVersionHint = string.Empty;
+        _busy = true;
+        try
+        {
+            if (_deployType == "docker" && _dockerUseSsh)
+            {
+                var ssh = ResolveSshServers().FirstOrDefault();
+                if (ssh == null) { Message.Warning("未选择 SSH 服务器"); return; }
+                var res = await Deploy.SshDockerHistoryAsync(_profile, ssh, TestLog);
+                _currentVersionHint = res?.Item1 ?? string.Empty;
+                foreach (var t in res?.Item2 ?? new List<Tuple<string, string>>())
+                {
+                    _history.Add(new HistoryItem
+                    {
+                        Version = t.Item1,
+                        Label = string.IsNullOrEmpty(t.Item2) ? t.Item1 : $"{t.Item1} — {t.Item2}"
+                    });
+                }
+            }
+            else
+            {
+                var server = ResolveServers().FirstOrDefault();
+                if (server == null) { Message.Warning("未选择目标服务器"); return; }
+                var res = await Deploy.CheckVersionAsync(server, GetCheckTarget(), GetCheckName(), TestLog);
+                if (res != null)
+                {
+                    _currentVersionHint = res.LastDeployTime;
+                    foreach (var v in res.History ?? new List<string>())
+                        _history.Add(new HistoryItem { Version = v, Label = v });
+                }
+            }
+            Message.Success($"获取到 {_history.Count} 个历史版本");
+        }
+        catch (Exception ex) { Message.Error($"获取历史版本异常：{ex.GetType().Name}: {ex.Message}"); }
+        finally { _busy = false; StateHasChanged(); }
+    }
+
+    // ---------------- 运行控制（全部委托给共享会话管理器） ----------------
+
+    private void Cancel()
+    {
+        if (SessionManager.RequestCancelByProfile(Id)) Message.Info("已请求停止...");
+        else Message.Warning("没有正在运行的任务");
+    }
+
+    private void Retry()
+    {
+        if (_session == null || _running) return;
+        var newId = SessionManager.Retry(_session.Id, CurrentUser.UserName);
+        if (newId == null) Message.Warning("无法重试该操作");
+        else Message.Info("已按上次操作重试");
+    }
+
+    public void Dispose()
+    {
+        SessionManager.OnSessionUpdated -= HandleSessionUpdated;
+    }
+
+    private class HistoryItem
+    {
+        public string Version { get; set; } = string.Empty;
+        public string Label { get; set; } = string.Empty;
+    }
+}

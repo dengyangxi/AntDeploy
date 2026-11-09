@@ -1,0 +1,330 @@
+@page "/users"
+@attribute [Authorize(Roles = "SuperAdmin,TeamAdmin")]
+@inject UserService Users
+@inject CurrentUserService CurrentUser
+@inject MessageService Message
+
+<div class="page-head">
+    <div class="page-head__titles">
+        <div class="page-head__title"><Icon Type="team" />用户管理</div>
+        <div class="page-head__sub">
+            @if (CurrentUser.IsSuperAdmin)
+            {
+                <span>超级管理员：管理全部团队与用户</span>
+            }
+            else
+            {
+                <span>团队管理员：管理本团队的普通用户</span>
+            }
+        </div>
+    </div>
+</div>
+
+@if (CurrentUser.IsSuperAdmin)
+{
+    <div class="panel" style="margin-bottom:16px;">
+        <div class="panel__head">
+            <span class="panel__title"><Icon Type="cluster" />团队</span>
+            <Button Size="ButtonSize.Small" Type="ButtonType.Primary" Icon="plus" OnClick="OpenCreateTeam">新建团队</Button>
+        </div>
+        <div class="panel__body" style="padding:0;">
+            <Table TItem="TeamEntity" DataSource="_teams" Size="TableSize.Small">
+                <ChildContent>
+                    <Column Title="团队名称" @bind-Field="@context.Name" Width="200" />
+                    <Column Title="描述" @bind-Field="@context.Description" />
+                    <ActionColumn Title="操作" Width="160">
+                        <Space>
+                            <SpaceItem><Button Size="ButtonSize.Small" OnClick="@(() => OpenEditTeam(context))">编辑</Button></SpaceItem>
+                            <SpaceItem>
+                                <Popconfirm Title="确认删除该团队" OnConfirm="@(() => DeleteTeam(context))">
+                                    <Button Size="ButtonSize.Small" Danger="true">删除</Button>
+                                </Popconfirm>
+                            </SpaceItem>
+                        </Space>
+                    </ActionColumn>
+                </ChildContent>
+            </Table>
+        </div>
+    </div>
+}
+
+<div class="panel">
+    <div class="panel__head">
+        <span class="panel__title"><Icon Type="user" />用户</span>
+        <Button Size="ButtonSize.Small" Type="ButtonType.Primary" Icon="plus" OnClick="OpenCreateUser">新建用户</Button>
+    </div>
+    <div class="panel__body" style="padding:0;">
+        <Table TItem="UserEntity" DataSource="_users" Size="TableSize.Middle" ScrollX="900">
+            <ChildContent>
+                <Column Title="用户名" @bind-Field="@context.UserName" Width="160" />
+                <Column Title="显示名" @bind-Field="@context.DisplayName" Width="160" />
+                <Column Title="角色" TData="string" Width="130">
+                    <Template><Tag Color="@RoleColor(context.Role)">@RoleText(context.Role)</Tag></Template>
+                </Column>
+                <Column Title="团队" TData="string" Width="160">
+                    <Template>@TeamName(context.TeamId)</Template>
+                </Column>
+                <Column Title="状态" TData="string" Width="100">
+                    <Template>
+                        @if (context.IsDisabled)
+                        {
+                            <Tag Color="@("default")">已禁用</Tag>
+                        }
+                        else
+                        {
+                            <Tag Color="@("green")">正常</Tag>
+                        }
+                    </Template>
+                </Column>
+                <ActionColumn Title="操作" Width="160">
+                    <Space>
+                        <SpaceItem><Button Size="ButtonSize.Small" OnClick="@(() => OpenEditUser(context))">编辑</Button></SpaceItem>
+                        <SpaceItem>
+                            <Popconfirm Title="确认删除该用户" OnConfirm="@(() => DeleteUser(context))">
+                                <Button Size="ButtonSize.Small" Danger="true">删除</Button>
+                            </Popconfirm>
+                        </SpaceItem>
+                    </Space>
+                </ActionColumn>
+            </ChildContent>
+        </Table>
+    </div>
+</div>
+
+@* ---------------- 团队编辑弹窗 ---------------- *@
+<Modal Title="@(_teamEditing ? "编辑团队" : "新建团队")"
+       @bind-Visible="_teamVisible"
+       OnOk="SaveTeam"
+       OnCancel="@(() => _teamVisible = false)"
+       OkText="@("保存")" CancelText="@("取消")">
+    <div style="margin-bottom:12px;">
+        <div style="margin-bottom:4px;">团队名称</div>
+        <Input @bind-Value="_teamModel.Name" Placeholder="如：交易平台组" />
+    </div>
+    <div>
+        <div style="margin-bottom:4px;">描述</div>
+        <Input @bind-Value="_teamModel.Description" Placeholder="可选" />
+    </div>
+</Modal>
+
+@* ---------------- 用户编辑弹窗 ---------------- *@
+<Modal Title="@(_userEditing ? "编辑用户" : "新建用户")"
+       @bind-Visible="_userVisible"
+       OnOk="SaveUser"
+       OnCancel="@(() => _userVisible = false)"
+       OkText="@("保存")" CancelText="@("取消")" Width="520">
+    <div class="pub-form">
+        <div class="pub-form__item">
+            <div class="pub-form__label">用户名</div>
+            <Input @bind-Value="_userModel.UserName" Disabled="_userEditing" Placeholder="登录用户名" />
+        </div>
+        <div class="pub-form__item">
+            <div class="pub-form__label">显示名</div>
+            <Input @bind-Value="_userModel.DisplayName" Placeholder="可选" />
+        </div>
+        <div class="pub-form__item">
+            <div class="pub-form__label">@(_userEditing ? "重置密码（留空则不修改）" : "密码")</div>
+            <InputPassword @bind-Value="_password" Placeholder="@(_userEditing ? "留空不修改" : "登录密码")" />
+        </div>
+        <div class="pub-form__item">
+            <div class="pub-form__label">角色</div>
+            <select class="native-select" value="@_userModel.Role" @onchange="OnRoleChange" disabled="@(!CurrentUser.IsSuperAdmin)">
+                @foreach (var r in AssignableRoles)
+                {
+                    <option value="@r">@RoleText(r)</option>
+                }
+            </select>
+        </div>
+        @if (CurrentUser.IsSuperAdmin && _userModel.Role != nameof(UserRole.SuperAdmin))
+        {
+            <div class="pub-form__item">
+                <div class="pub-form__label">所属团队</div>
+                <select class="native-select" value="@_userModel.TeamId" @onchange="OnTeamChange">
+                    <option value="">（未分配）</option>
+                    @foreach (var t in _teams)
+                    {
+                        <option value="@t.Id">@t.Name</option>
+                    }
+                </select>
+            </div>
+        }
+        @if (_userEditing)
+        {
+            <div class="pub-form__item">
+                <div class="pub-form__label">禁用该用户</div>
+                <Switch @bind-Value="_userModel.IsDisabled" />
+            </div>
+        }
+    </div>
+</Modal>
+
+@code {
+    private List<TeamEntity> _teams = new();
+    private List<UserEntity> _users = new();
+
+    // 团队弹窗
+    private bool _teamVisible;
+    private bool _teamEditing;
+    private TeamEntity _teamModel = new();
+
+    // 用户弹窗
+    private bool _userVisible;
+    private bool _userEditing;
+    private UserEntity _userModel = new();
+    private string _password = string.Empty;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await CurrentUser.LoadAsync();
+        Reload();
+    }
+
+    private void Reload()
+    {
+        _teams = Users.ListTeams();
+        // 超级管理员看全部用户；团队管理员只看本团队用户
+        _users = CurrentUser.IsSuperAdmin
+            ? Users.ListUsers()
+            : Users.ListUsers(CurrentUser.TeamId);
+    }
+
+    // ---------------- 团队 ----------------
+
+    private void OpenCreateTeam()
+    {
+        _teamEditing = false;
+        _teamModel = new TeamEntity();
+        _teamVisible = true;
+    }
+
+    private void OpenEditTeam(TeamEntity team)
+    {
+        _teamEditing = true;
+        _teamModel = new TeamEntity { Id = team.Id, Name = team.Name, Description = team.Description };
+        _teamVisible = true;
+    }
+
+    private void SaveTeam()
+    {
+        if (string.IsNullOrWhiteSpace(_teamModel.Name)) { Message.Error("请填写团队名称"); return; }
+        var (ok, err) = _teamEditing
+            ? Users.UpdateTeam(_teamModel.Id, _teamModel.Name, _teamModel.Description)
+            : Users.CreateTeam(_teamModel.Name, _teamModel.Description);
+        if (!ok) { Message.Error(err); return; }
+        _teamVisible = false;
+        Reload();
+        Message.Success("已保存");
+    }
+
+    private void DeleteTeam(TeamEntity team)
+    {
+        var (ok, err) = Users.DeleteTeam(team.Id);
+        if (!ok) { Message.Error(err); return; }
+        Reload();
+        Message.Success("已删除");
+    }
+
+    // ---------------- 用户 ----------------
+
+    private string[] AssignableRoles => CurrentUser.IsSuperAdmin
+        ? new[] { nameof(UserRole.SuperAdmin), nameof(UserRole.TeamAdmin), nameof(UserRole.User) }
+        : new[] { nameof(UserRole.User) };
+
+    private void OpenCreateUser()
+    {
+        _userEditing = false;
+        _password = string.Empty;
+        _userModel = new UserEntity
+        {
+            Role = CurrentUser.IsSuperAdmin ? nameof(UserRole.User) : nameof(UserRole.User),
+            TeamId = CurrentUser.IsSuperAdmin ? null : CurrentUser.TeamId
+        };
+        _userVisible = true;
+    }
+
+    private void OpenEditUser(UserEntity user)
+    {
+        // 团队管理员只能编辑本团队的普通用户
+        if (!CurrentUser.IsSuperAdmin)
+        {
+            if (user.TeamId != CurrentUser.TeamId || user.GetRole() != UserRole.User)
+            {
+                Message.Warning("无权编辑该用户");
+                return;
+            }
+        }
+        _userEditing = true;
+        _password = string.Empty;
+        _userModel = new UserEntity
+        {
+            Id = user.Id,
+            UserName = user.UserName,
+            DisplayName = user.DisplayName,
+            Role = user.Role,
+            TeamId = user.TeamId,
+            IsDisabled = user.IsDisabled
+        };
+        _userVisible = true;
+    }
+
+    private void OnRoleChange(ChangeEventArgs e) => _userModel.Role = e.Value?.ToString() ?? nameof(UserRole.User);
+    private void OnTeamChange(ChangeEventArgs e) => _userModel.TeamId = string.IsNullOrEmpty(e.Value?.ToString()) ? null : e.Value?.ToString();
+
+    private void SaveUser()
+    {
+        if (!_userEditing && string.IsNullOrWhiteSpace(_userModel.UserName)) { Message.Error("请填写用户名"); return; }
+        if (!_userEditing && string.IsNullOrWhiteSpace(_password)) { Message.Error("请填写密码"); return; }
+
+        var role = Enum.TryParse<UserRole>(_userModel.Role, true, out var r) ? r : UserRole.User;
+        (bool ok, string err) result;
+        if (_userEditing)
+        {
+            result = Users.UpdateUser(_userModel.Id, _userModel.DisplayName, role, _userModel.TeamId, _userModel.IsDisabled,
+                string.IsNullOrWhiteSpace(_password) ? null : _password);
+        }
+        else
+        {
+            result = Users.CreateUser(_userModel.UserName, _password, _userModel.DisplayName, role, _userModel.TeamId);
+        }
+        if (!result.ok) { Message.Error(result.err); return; }
+        _userVisible = false;
+        Reload();
+        Message.Success("已保存");
+    }
+
+    private void DeleteUser(UserEntity user)
+    {
+        if (!CurrentUser.IsSuperAdmin)
+        {
+            if (user.TeamId != CurrentUser.TeamId || user.GetRole() != UserRole.User)
+            {
+                Message.Warning("无权删除该用户");
+                return;
+            }
+        }
+        var (ok, err) = Users.DeleteUser(user.Id);
+        if (!ok) { Message.Error(err); return; }
+        Reload();
+        Message.Success("已删除");
+    }
+
+    private static string RoleText(string role) => role switch
+    {
+        nameof(UserRole.SuperAdmin) => "超级管理员",
+        nameof(UserRole.TeamAdmin) => "团队管理员",
+        _ => "普通用户"
+    };
+
+    private static string RoleColor(string role) => role switch
+    {
+        nameof(UserRole.SuperAdmin) => "red",
+        nameof(UserRole.TeamAdmin) => "blue",
+        _ => "default"
+    };
+
+    private string TeamName(string? teamId)
+    {
+        if (string.IsNullOrEmpty(teamId)) return "-";
+        return _teams.FirstOrDefault(t => t.Id == teamId)?.Name ?? teamId;
+    }
+}

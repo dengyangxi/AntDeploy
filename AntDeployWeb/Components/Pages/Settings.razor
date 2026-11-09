@@ -1,0 +1,115 @@
+@page "/settings"
+@attribute [Authorize(Roles = "SuperAdmin")]
+@using AntDeploy.Core.Util
+@inject IConfigStore Store
+@inject MessageService Message
+
+<div class="page-head">
+    <div class="page-head__titles">
+        <div class="page-head__title"><Icon Type="setting" />全局设置</div>
+        <div class="page-head__sub">构建、部署与界面偏好，对全部项目生效</div>
+    </div>
+    <div class="page-head__actions">
+        <Button Type="ButtonType.Primary" Icon="save" OnClick="Save">保存设置</Button>
+    </div>
+</div>
+
+<div class="settings-wrap">
+    <div class="panel">
+        <div class="panel__head"><span class="panel__title"><Icon Type="build" />构建与编译</span></div>
+        <div class="panel__body">
+            <div class="setting-row">
+                <div class="setting-label">代码工作区根目录</div>
+                <Input @bind-Value="_settings.WorkspaceRoot" Placeholder="留空则使用 App_Data/workspace" />
+                <div class="setting-hint">Git clone / pull 的代码落地根目录，每个项目在其下建独立子目录。当前生效：@Store.GetWorkspaceRoot()</div>
+            </div>
+
+            <div class="setting-row">
+                <div class="setting-label">MSBuild.exe 路径</div>
+                <Input @bind-Value="_settings.MsBuildPath" Placeholder="留空则自动通过 vswhere 探测" />
+                <div class="setting-hint">
+                    编译 .NET Framework 项目所需。
+                    <Button Size="ButtonSize.Small" OnClick="Detect">自动探测</Button>
+                </div>
+            </div>
+
+            <div class="setting-row">
+                <div class="setting-label">jib.exe 目录</div>
+                <Input @bind-Value="_settings.JibPath" Placeholder="留空则自动探测程序目录 / DLL 目录" />
+                <div class="setting-hint">Docker 镜像构建（构建镜像按钮）所需的 jib.exe 所在目录。当前生效：@Store.GetJibPath()</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="panel">
+        <div class="panel__head"><span class="panel__title"><Icon Type="cloud" />部署与网络</span></div>
+        <div class="panel__body">
+            <div class="setting-row">
+                <div class="setting-label">部署 HTTP 代理</div>
+                <Input @bind-Value="_settings.DeployHttpProxy" Placeholder="host:port，留空不使用" />
+                <div class="setting-hint">Agent 上传与 SSH 直连所使用的 HTTP 代理。</div>
+            </div>
+
+            <div class="setting-row setting-row--switch">
+                <div class="setting-label">Docker 容器使用 Asia/Shanghai 时区</div>
+                <Switch @bind-Value="_settings.UseAsiaShanghai" />
+            </div>
+        </div>
+    </div>
+
+    <div class="panel">
+        <div class="panel__head"><span class="panel__title"><Icon Type="control" />配置与界面</span></div>
+        <div class="panel__body">
+            <div class="setting-row setting-row--switch">
+                <div class="setting-label">保存日志到文件</div>
+                <Switch @bind-Value="_settings.SaveLogs" />
+            </div>
+
+            <div class="setting-row setting-row--switch">
+                <div class="setting-label">同时保存配置到项目目录 AntDeploy.json</div>
+                <Switch @bind-Value="_settings.EnableAntDeployJson" />
+                <div class="setting-hint" style="flex-basis:100%;margin-top:8px;">开启后，除全局存储外，还会把项目配置写入其代码目录下的 AntDeploy.json，便于随仓库共享。</div>
+            </div>
+
+            <div class="setting-row">
+                <div class="setting-label">界面语言 Language</div>
+                <select class="native-select" style="max-width:200px;" value="@_settings.Language" @onchange="OnLanguageChange">
+                    <option value="zh">中文 (zh)</option>
+                    <option value="en">English (en)</option>
+                </select>
+            </div>
+        </div>
+    </div>
+</div>
+
+@code {
+    private WebSettings _settings = new();
+
+    protected override void OnInitialized()
+    {
+        _settings = Store.GetSettings();
+    }
+
+    private void OnLanguageChange(ChangeEventArgs e)
+    {
+        _settings.Language = e.Value?.ToString() ?? "zh";
+    }
+
+    private void Detect()
+    {
+        var path = CommandHelper.GetMsBuildPath();
+        if (string.IsNullOrEmpty(path))
+        {
+            Message.Warning("未探测到 MSBuild.exe，请手动填写");
+            return;
+        }
+        _settings.MsBuildPath = path;
+        Message.Success("已探测：" + path);
+    }
+
+    private void Save()
+    {
+        Store.SaveSettings(_settings);
+        Message.Success("设置已保存");
+    }
+}

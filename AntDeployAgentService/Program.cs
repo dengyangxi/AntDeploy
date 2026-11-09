@@ -45,6 +45,8 @@ namespace AntDeployAgentService
             TinyFoxService.WebRoot = Path.Combine(pathToContentRoot, "wwwroot");
             ConfigurationManager.Initialize(pathToExe);
 #endif
+            // 配置加载器：以 agentsettings.json 为主，回退旧 *.config（须在 ConfigurationManager.Initialize 之后）
+            AntDeployAgentWindows.Model.AgentConfigLoader.Initialize(pathToContentRoot);
             var isService = !(Debugger.IsAttached || args.Contains("--console"));
 
             if (HaveVisibleConsole()) isService = false;

@@ -37,10 +37,10 @@ namespace AntDeployAgentService
             try
             {
                 ExposeNssmExe();
-                var port = System.Configuration.ConfigurationManager.AppSettings["Port"];
+                var port = AntDeployAgentWindows.Model.AgentConfigLoader.Current.Port;
                 TinyFoxService.OwinOnly = true;
                 TinyFoxService.IpAddress = TyeIpAddress.Any;
-                TinyFoxService.Port = string.IsNullOrEmpty(port) ? 8088 : int.Parse(port);
+                TinyFoxService.Port = port > 0 ? port : 8088;
                 _startup = new AntDeployAgentWindows.Startup();
                 TinyFoxService.Start(_startup.OwinMain);
             }

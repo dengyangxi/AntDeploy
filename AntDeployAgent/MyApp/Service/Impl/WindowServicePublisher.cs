@@ -9,11 +9,13 @@ using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using AntDeployAgent.Util;
+using AntDeployAgentWindows.Model;
+using AntDeployAgentWindows.MyApp.Service;
+using AntDeployAgentWindows.Operation;
 using AntDeployAgentWindows.Operation.OperationTypes;
+using AntDeployAgentWindows.Util;
+using AntDeployAgentWindows.WebApiCore;
 using System.Runtime.InteropServices;
-using AntDeployAgent.WebApiCore;
-using AntDeployAgent.Operation;
-using AntDeployAgent.Model;
 namespace AntDeployAgent.MyApp.Service.Impl
 {
     public class WindowServicePublisher : PublishProviderBasicAPI

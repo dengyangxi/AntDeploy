@@ -5,11 +5,11 @@ using System.Net;
 using System.Text;
 using System.Threading.Tasks;
 using System.Web;
-using AntDeployAgent.Model;
+using AntDeployAgentWindows.Model;
 using Microsoft.Owin;
 using Newtonsoft.Json;
 
-namespace AntDeployAgent.WebApiCore
+namespace AntDeployAgentWindows.WebApiCore
 {
     /// <summary>
     /// Fast WebApi基类
@@ -17,12 +17,8 @@ namespace AntDeployAgent.WebApiCore
     public abstract class BaseWebApi
     {
 
-        static BaseWebApi()
-        {
-            Token = System.Configuration.ConfigurationManager.AppSettings["Token"];
-        }
-
-        protected static  string Token;
+        /// <summary>授权 Token（热加载：每次读取 <see cref="AgentConfigLoader.Current"/>，改配置无需重启）。</summary>
+        protected static string Token => AgentConfigLoader.Current.Token;
 
         #region <子类可见的保护对象>
 

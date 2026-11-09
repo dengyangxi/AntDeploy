@@ -1,0 +1,45 @@
+@page "/login"
+@layout BlankLayout
+@attribute [AllowAnonymous]
+
+<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#0f172a 0%,#0e7490 100%);font-family:'IBM Plex Sans',system-ui,sans-serif;">
+    <form method="post" action="/account/login" data-enhance="false"
+          style="width:360px;background:#fff;border-radius:12px;padding:36px 32px;box-shadow:0 20px 60px rgba(0,0,0,.35);">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;">
+            <span style="width:34px;height:34px;border-radius:8px;background:#0e7490;color:#fff;display:inline-flex;align-items:center;justify-content:center;font-weight:700;">A</span>
+            <span style="font-size:20px;font-weight:700;color:#0f172a;">AntDeploy</span>
+        </div>
+        <div style="color:#64748b;font-size:13px;margin-bottom:22px;">自动化部署平台 · 请登录</div>
+
+        @if (HasError)
+        {
+            <div style="background:#fff2f0;border:1px solid #ffccc7;color:#cf1322;border-radius:6px;padding:8px 12px;font-size:13px;margin-bottom:16px;">
+                用户名或密码错误，或账号已被禁用
+            </div>
+        }
+
+        <label style="display:block;font-size:13px;color:#334155;margin-bottom:6px;">用户名</label>
+        <input name="username" type="text" autocomplete="username" required autofocus
+               style="width:100%;box-sizing:border-box;height:38px;border:1px solid #d9d9d9;border-radius:6px;padding:0 12px;font-size:14px;margin-bottom:16px;" />
+
+        <label style="display:block;font-size:13px;color:#334155;margin-bottom:6px;">密码</label>
+        <input name="password" type="password" autocomplete="current-password" required
+               style="width:100%;box-sizing:border-box;height:38px;border:1px solid #d9d9d9;border-radius:6px;padding:0 12px;font-size:14px;margin-bottom:22px;" />
+
+        <button type="submit"
+                style="width:100%;height:40px;border:none;border-radius:6px;background:#0e7490;color:#fff;font-size:15px;font-weight:600;cursor:pointer;">
+            登录
+        </button>
+
+        <div style="color:#94a3b8;font-size:12px;margin-top:18px;text-align:center;">
+            
+        </div>
+    </form>
+</div>
+
+@code {
+    [SupplyParameterFromQuery(Name = "error")]
+    public string? Error { get; set; }
+
+    private bool HasError => !string.IsNullOrEmpty(Error) && Error != "0" && Error != "false";
+}

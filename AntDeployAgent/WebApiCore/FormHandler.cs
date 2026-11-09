@@ -6,7 +6,7 @@ using System.Text;
 using System.Threading.Tasks;
 using Microsoft.Owin;
 
-namespace AntDeployAgent.WebApiCore
+namespace AntDeployAgentWindows.WebApiCore
 {
     /// <summary>
     /// POST数据处理类

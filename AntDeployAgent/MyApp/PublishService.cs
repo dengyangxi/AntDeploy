@@ -1,12 +1,12 @@
-﻿using AntDeployAgent.Model;
-using AntDeployAgent.MyApp.Service;
-using AntDeployAgent.WebApiCore;
+﻿using AntDeployAgentWindows.Model;
+using AntDeployAgentWindows.MyApp.Service;
+using AntDeployAgentWindows.WebApiCore;
 using Newtonsoft.Json;
 using System.Collections.Generic;
 using System.Linq;
 using System.Web;
 
-namespace AntDeployAgent.MyApp
+namespace AntDeployAgentWindows.MyApp
 {
     public class PublishService : BaseWebApi
     {
@@ -38,10 +38,17 @@ namespace AntDeployAgent.MyApp
                 }
 
                 var file = formHandler.FormItems.FirstOrDefault(r => r.FieldName.Equals("publish"));
-                if (file == null || file.FileBody == null && string.IsNullOrEmpty(file.FilePath) || file.FileBody != null && file.FileBody.Length < 1)
+                // 两阶段发布的 deploy 阶段不带 zip（发布包已在 upload 阶段就位），放开 file required 校验
+                var phaseItem = formHandler.FormItems.FirstOrDefault(r => r.FieldName.Equals("deployPhase"));
+                var isDeployPhase = phaseItem != null && !string.IsNullOrEmpty(phaseItem.TextValue)
+                                    && phaseItem.TextValue.Trim().ToLower().Equals("deploy");
+                if (!isDeployPhase)
                 {
-                    WriteError("file required");
-                    return;
+                    if (file == null || file.FileBody == null && string.IsNullOrEmpty(file.FilePath) || file.FileBody != null && file.FileBody.Length < 1)
+                    {
+                        WriteError("file required");
+                        return;
+                    }
                 }
 
                 var publisher = PublishProviderFactory.GetProcessor(publishType.TextValue);

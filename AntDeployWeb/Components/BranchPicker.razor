@@ -1,0 +1,139 @@
+@using AntDeployWeb.Services
+@inject DeployService DeploySvc
+
+<div class="branch-picker">
+    <input type="text" list="@ListId" placeholder="@Placeholder"
+           class="ant-input" disabled="@Disabled"
+           value="@Value" @onchange="OnInputChange" />
+    <datalist id="@ListId">
+        @foreach (var b in BranchOptions)
+        {
+            <option value="@b">@b</option>
+        }
+    </datalist>
+    @if (_loading)
+    {
+        <span class="form-hint" style="color:#1890ff;">正在加载分支...</span>
+    }
+    else if (!_loaded && !string.IsNullOrEmpty(RepositoryUrl))
+    {
+        <span class="form-hint">未加载分支，可手动输入或点击刷新</span>
+    }
+    <button type="button" class="btn-mini" style="margin-left:4px;" disabled="@(Disabled || _loading)" @onclick="ReloadAsync" title="刷新远程分支">↻</button>
+</div>
+
+@code {
+    [Parameter] public string RepositoryUrl { get; set; } = "";
+    [Parameter] public string UserName { get; set; } = "";
+    [Parameter] public string Password { get; set; } = "";
+    [Parameter] public string Value { get; set; } = "";
+    [Parameter] public EventCallback<string> ValueChanged { get; set; }
+    /// <summary>默认选中分支（通常为最近发版分支 LastPublishBranch）</summary>
+    [Parameter] public string DefaultValue { get; set; } = "";
+    [Parameter] public bool Disabled { get; set; }
+    [Parameter] public string Placeholder { get; set; } = "分支，可输入模糊搜索";
+    /// <summary>datalist 唯一 id</summary>
+    [Parameter] public string ListId { get; set; } = "branch-list";
+
+    private List<string> _branches = new();
+    private bool _loading;
+    private bool _loaded;
+    private string? _loadedUrl;
+
+    private List<string> BranchOptions
+    {
+        get
+        {
+            // 确保默认分支/当前值始终在候选首位，模糊搜索由原生 datalist 提供
+            var list = new List<string>();
+            if (!string.IsNullOrWhiteSpace(DefaultValue) && !list.Contains(DefaultValue))
+                list.Add(DefaultValue);
+            if (!string.IsNullOrWhiteSpace(Value) && !list.Contains(Value))
+                list.Add(Value);
+            foreach (var b in _branches)
+            {
+                if (!string.IsNullOrWhiteSpace(b) && !list.Contains(b))
+                    list.Add(b);
+            }
+            return list;
+        }
+    }
+
+    protected override void OnParametersSet()
+    {
+        // 未指定值时用默认分支兜底
+        if (string.IsNullOrWhiteSpace(Value) && !string.IsNullOrWhiteSpace(DefaultValue))
+        {
+            Value = DefaultValue;
+            _ = ValueChanged.InvokeAsync(Value);
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // 首次渲染，或仓库地址变化（发布弹窗跨项目复用）时加载远程分支
+        if (!string.IsNullOrWhiteSpace(RepositoryUrl) && RepositoryUrl != _loadedUrl && !_loading)
+        {
+            await LoadBranchesAsync();
+        }
+    }
+
+    private async Task OnInputChange(ChangeEventArgs e)
+    {
+        Value = e.Value?.ToString() ?? "";
+        await ValueChanged.InvokeAsync(Value);
+    }
+
+    /// <summary>公开方法：外部“拉取分支”按钮触发重载</summary>
+    public async Task ReloadAsync()
+    {
+        await LoadBranchesAsync();
+    }
+
+    private async Task LoadBranchesAsync()
+    {
+        if (string.IsNullOrWhiteSpace(RepositoryUrl))
+        {
+            _branches.Clear();
+            _loaded = false;
+            _loadedUrl = null;
+            StateHasChanged();
+            return;
+        }
+
+        _loading = true;
+        _loadedUrl = RepositoryUrl;
+        StateHasChanged();
+
+        var url = RepositoryUrl;
+        var user = UserName;
+        var pwd = Password;
+        try
+        {
+            var branches = await Task.Run(() => DeploySvc.ListBranches(url, user, pwd));
+            _branches = branches ?? new List<string>();
+            _loaded = _branches.Count > 0;
+
+            // 仍无值时，优先默认分支，其次远程首个分支
+            if (string.IsNullOrWhiteSpace(Value))
+            {
+                var pick = !string.IsNullOrWhiteSpace(DefaultValue) ? DefaultValue
+                    : (_branches.Count > 0 ? _branches[0] : "");
+                if (!string.IsNullOrWhiteSpace(pick))
+                {
+                    Value = pick;
+                    await ValueChanged.InvokeAsync(Value);
+                }
+            }
+        }
+        catch
+        {
+            _loaded = false;
+        }
+        finally
+        {
+            _loading = false;
+        }
+        await InvokeAsync(StateHasChanged);
+    }
+}

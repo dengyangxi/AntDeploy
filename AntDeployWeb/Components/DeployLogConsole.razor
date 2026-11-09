@@ -1,0 +1,82 @@
+@*
+    可复用实时日志控制台：详情页与项目列表日志浮窗共用。
+    Lines 由调用方在锁内快照后传入（渲染线程安全）；Live 控制呼吸点动画。
+    智能自动滚底：默认吸底，用户上滚查看历史则暂停自动，滚回底部恢复（判定在 logScroll.js 浏览器端完成，无 scroll 回服务器开销）。
+*@
+@inject IJSRuntime JS
+<div class="console" style="@ContainerStyle">
+    <div class="console__bar">
+        <span class="console__label">
+            <span class="console__dot @(Live ? "console__dot--live" : "")"></span>
+            @Header
+            @if (!string.IsNullOrWhiteSpace(SubHeader))
+            {
+                <span class="form-hint" style="margin-left:8px;">@SubHeader</span>
+            }
+        </span>
+        <span class="console__actions">
+            @Actions
+        </span>
+    </div>
+    <div class="deploy-log" @ref="_logEl" style="max-height:@Height;overflow-y:auto;">
+        @foreach (var line in Lines)
+        {
+            <div class="@line.Css">
+                <span class="log-time">@line.Time</span>
+                <span class="log-text">@line.Text</span>
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    /// <summary>日志行快照（调用方负责在 LogLock 下 ToList 后传入）。</summary>
+    [Parameter] public IReadOnlyList<LogEntry> Lines { get; set; } = Array.Empty<LogEntry>();
+
+    /// <summary>是否为运行中（控制呼吸点动画）。</summary>
+    [Parameter] public bool Live { get; set; }
+
+    /// <summary>标题栏主文案。</summary>
+    [Parameter] public string Header { get; set; } = "实时日志 · REALTIME LOG";
+
+    /// <summary>标题栏副文案（操作 · 状态 · 触发人等）。</summary>
+    [Parameter] public string SubHeader { get; set; } = string.Empty;
+
+    /// <summary>日志区最大高度。</summary>
+    [Parameter] public string Height { get; set; } = "380px";
+
+    /// <summary>外层容器附加样式（如 margin-top）。</summary>
+    [Parameter] public string ContainerStyle { get; set; } = string.Empty;
+
+    /// <summary>标题栏右侧操作区（如刷新按钮），由调用方以 RenderFragment 传入。</summary>
+    [Parameter] public RenderFragment? Actions { get; set; }
+
+    private ElementReference _logEl;
+    private int _lastCount;
+    private bool _jsReady;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            // 绑定滚动监听并初始吸底；JS 不可用时静默降级为不自动滚动（不影响日志展示）
+            try
+            {
+                await JS.InvokeVoidAsync("antdeployScroll.init", _logEl);
+                await JS.InvokeVoidAsync("antdeployScroll.toBottom", _logEl);
+                _jsReady = true;
+            }
+            catch { _jsReady = false; }
+            _lastCount = Lines.Count;
+            return;
+        }
+
+        // 仅在日志行数变化时尝试滚底；是否真的滚动由 JS 依据用户吸底状态决定（上滚查看历史时不打扰）
+        if (_jsReady && Lines.Count != _lastCount)
+        {
+            _lastCount = Lines.Count;
+            try { await JS.InvokeVoidAsync("antdeployScroll.toBottomIfPinned", _logEl); }
+            catch { /* 电路断开 / JS 异常时忽略 */ }
+        }
+    }
+}

@@ -4,12 +4,13 @@ using System.IO;
 using System.IO.Compression;
 using System.Linq;
 using System.Threading.Tasks;
+using AntDeployAgentWindows.Model;
+using AntDeployAgentWindows.MyApp.Service;
+using AntDeployAgentWindows.Operation;
 using AntDeployAgentWindows.Operation.OperationTypes;
+using AntDeployAgentWindows.Util;
+using AntDeployAgentWindows.WebApiCore;
 using System.Runtime.InteropServices;
-using AntDeployAgent.WebApiCore;
-using AntDeployAgent.Operation;
-using AntDeployAgent.Model;
-using AntDeployAgent.Util;
 namespace AntDeployAgent.MyApp.Service.Impl
 {
     public class IIsPublisher : PublishProviderBasicAPI
@@ -45,36 +46,17 @@ namespace AntDeployAgent.MyApp.Service.Impl
             try
             {
                 var isNetcore = _sdkTypeName.ToLower().Equals("netcore");
-                var _zipFile = Path.Combine(_projectPublishFolder, fileItem.FileName);
-                var saveErr = SaveUploadFile(fileItem, _zipFile);
-                if (!string.IsNullOrEmpty(saveErr)) return saveErr;
 
-
-
-                if (!File.Exists(_zipFile))
+                // 存包+解压：原子模式带 fileItem；两阶段 deploy 模式 fileItem 为 null（包已在 upload 阶段解压就位）
+                if (fileItem != null)
                 {
-                    return "publish file save fail";
+                    var prepErr = SaveAndUnzip(fileItem);
+                    if (!string.IsNullOrEmpty(prepErr)) return prepErr;
                 }
-#if NETCORE
-                Log("netcore agent version ==>" + Version.VERSION);
-#else
-                Log("netframework agent version ==>" + Version.VERSION);
-#endif
-
-
-                Log("upload success ==>" + _zipFile);
-                //解压
-                try
+                else
                 {
-                    Log("start unzip file");
-                    ZipFile.ExtractToDirectory(_zipFile, _projectPublishFolder);
+                    Log("【twophase】deploy 阶段：跳过存包解压，直接定位已解压目录 " + _projectPublishFolder);
                 }
-                catch (Exception ex)
-                {
-                    return "unzip publish file error:" + ex.Message;
-                }
-
-                Log("unzip success ==>" + _projectPublishFolder);
 
                 deployFolder = findUploadFolder(_projectPublishFolder, true);
 
@@ -373,6 +355,87 @@ namespace AntDeployAgent.MyApp.Service.Impl
             }
         }
 
+
+        /// <summary>
+        /// 存包+解压到版本目录（原子模式与两阶段 upload 模式复用）。返回空表示成功。
+        /// </summary>
+        private string SaveAndUnzip(FormHandler.FormItem fileItem)
+        {
+            var _zipFile = Path.Combine(_projectPublishFolder, fileItem.FileName);
+            var saveErr = SaveUploadFile(fileItem, _zipFile);
+            if (!string.IsNullOrEmpty(saveErr)) return saveErr;
+
+            if (!File.Exists(_zipFile))
+            {
+                return "publish file save fail";
+            }
+#if NETCORE
+            Log("netcore agent version ==>" + Version.VERSION);
+#else
+            Log("netframework agent version ==>" + Version.VERSION);
+#endif
+
+            Log("upload success ==>" + _zipFile);
+            //解压
+            try
+            {
+                Log("start unzip file");
+                ZipFile.ExtractToDirectory(_zipFile, _projectPublishFolder);
+            }
+            catch (Exception ex)
+            {
+                return "unzip publish file error:" + ex.Message;
+            }
+
+            Log("unzip success ==>" + _projectPublishFolder);
+            return string.Empty;
+        }
+
+        /// <summary>
+        /// 两阶段发布的 upload 阶段：仅算版本目录、存包、解压，不动 IIS 站点。
+        /// 部署（停池/替换/回收）留到 deploy 阶段执行。
+        /// </summary>
+        protected override string PrepareUpload(FormHandler.FormItem fileItem)
+        {
+            var projectPath = Path.Combine(Setting.PublishIIsPathFolder, _projectName);
+            _projectPublishFolder = Path.Combine(projectPath,
+                !string.IsNullOrEmpty(_dateTimeFolderName) ? _dateTimeFolderName : DateTime.Now.ToString("yyyyMMddHHmmss"));
+            EnsureProjectFolder(projectPath);
+            EnsureProjectFolder(_projectPublishFolder);
+
+            var err = SaveAndUnzip(fileItem);
+            if (!string.IsNullOrEmpty(err)) return err;
+
+            var deployFolder = findUploadFolder(_projectPublishFolder, true);
+            if (!Directory.Exists(deployFolder))
+            {
+                return "unzip publish file error,Path not found:" + deployFolder;
+            }
+
+            Log("【twophase】upload 阶段完成，发布包已就位：" + deployFolder);
+            return string.Empty;
+        }
+
+        /// <summary>
+        /// 相对路径回调端口：优先取表单 port 字段；为空则读 IIS 站点绑定端口（best-effort）。
+        /// </summary>
+        protected override string CallbackPortForRelative
+        {
+            get
+            {
+                if (!string.IsNullOrEmpty(_port)) return _port;
+                try
+                {
+                    if (string.IsNullOrEmpty(_webSiteName)) return null;
+                    var arr = _webSiteName.Split('/');
+                    return IISHelper.GetSiteBindPort(arr[0], Log);
+                }
+                catch
+                {
+                    return null;
+                }
+            }
+        }
 
         public override string CheckData(FormHandler formHandler)
         {

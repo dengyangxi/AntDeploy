@@ -27,6 +27,10 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "2022", "2022", "{7E390D43-8
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AntDeployV2", "AntDeploy2022\AntDeployV2\AntDeployV2.csproj", "{68039847-4E49-4839-AABC-AA773A0BC61D}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AntDeployWeb", "AntDeployWeb\AntDeployWeb.csproj", "{B5C35F4B-DD58-0015-AF9F-F542B520379F}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AntDeploy.Core", "AntDeploy.Core\AntDeploy.Core.csproj", "{25D8C0A5-C29C-4ED0-A6E0-9C4C211340E6}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -91,6 +95,22 @@ Global
 		{68039847-4E49-4839-AABC-AA773A0BC61D}.Release|Any CPU.Build.0 = Release|Any CPU
 		{68039847-4E49-4839-AABC-AA773A0BC61D}.Release|x86.ActiveCfg = Release|x86
 		{68039847-4E49-4839-AABC-AA773A0BC61D}.Release|x86.Build.0 = Release|x86
+		{B5C35F4B-DD58-0015-AF9F-F542B520379F}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{B5C35F4B-DD58-0015-AF9F-F542B520379F}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{B5C35F4B-DD58-0015-AF9F-F542B520379F}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{B5C35F4B-DD58-0015-AF9F-F542B520379F}.Debug|x86.Build.0 = Debug|Any CPU
+		{B5C35F4B-DD58-0015-AF9F-F542B520379F}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{B5C35F4B-DD58-0015-AF9F-F542B520379F}.Release|Any CPU.Build.0 = Release|Any CPU
+		{B5C35F4B-DD58-0015-AF9F-F542B520379F}.Release|x86.ActiveCfg = Release|Any CPU
+		{B5C35F4B-DD58-0015-AF9F-F542B520379F}.Release|x86.Build.0 = Release|Any CPU
+		{25D8C0A5-C29C-4ED0-A6E0-9C4C211340E6}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{25D8C0A5-C29C-4ED0-A6E0-9C4C211340E6}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{25D8C0A5-C29C-4ED0-A6E0-9C4C211340E6}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{25D8C0A5-C29C-4ED0-A6E0-9C4C211340E6}.Debug|x86.Build.0 = Debug|Any CPU
+		{25D8C0A5-C29C-4ED0-A6E0-9C4C211340E6}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{25D8C0A5-C29C-4ED0-A6E0-9C4C211340E6}.Release|Any CPU.Build.0 = Release|Any CPU
+		{25D8C0A5-C29C-4ED0-A6E0-9C4C211340E6}.Release|x86.ActiveCfg = Release|Any CPU
+		{25D8C0A5-C29C-4ED0-A6E0-9C4C211340E6}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

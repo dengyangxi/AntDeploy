@@ -1,0 +1,524 @@
+@page "/agents"
+@attribute [Authorize(Roles = "SuperAdmin,TeamAdmin")]
+@inject AgentService AgentStore
+@inject AgentVerifier Verifier
+@inject UserService Users
+@inject CurrentUserService CurrentUser
+@inject MessageService Message
+
+<div class="page-head">
+    <div class="page-head__titles">
+        <div class="page-head__title"><Icon Type="cloud-server" />Agent 管理</div>
+        <div class="page-head__sub">
+            @if (CurrentUser.IsSuperAdmin)
+            {
+                <span>超级管理员：管理全部团队的 Agent 客户端</span>
+            }
+            else
+            {
+                <span>团队管理员：管理本团队的 Agent 客户端</span>
+            }
+        </div>
+    </div>
+    <div class="page-head__actions">
+        <Space>
+            <SpaceItem><Button Size="ButtonSize.Small" Type="ButtonType.Primary" Icon="cloud-download" OnClick="OpenInstall">在线安装</Button></SpaceItem>
+            <SpaceItem><Button Size="ButtonSize.Small" Icon="reload" OnClick="Reload">刷新</Button></SpaceItem>
+            <SpaceItem><Button Size="ButtonSize.Small" Icon="book" OnClick="OpenManual">手工安装教程 / 排错手册</Button></SpaceItem>
+        </Space>
+    </div>
+</div>
+
+<div class="panel">
+    <div class="panel__head">
+        <span class="panel__title"><Icon Type="cloud-server" />Agent 客户端</span>
+    </div>
+    <div class="panel__body" style="padding:0;">
+        <Table TItem="AgentClient" DataSource="_agents" Size="TableSize.Middle" ScrollX="1040">
+            <ChildContent>
+                <Column Title="名称" @bind-Field="@context.Name" Width="200" />
+                <Column Title="类型" TData="string" Width="110">
+                    <Template><Tag Color="@OsColor(context.OsType)">@OsText(context.OsType)</Tag></Template>
+                </Column>
+                <Column Title="团队" TData="string" Width="160">
+                    <Template>@TeamName(context.TeamId)</Template>
+                </Column>
+                <Column Title="服务器数" TData="int" Width="100">
+                    <Template>@context.ServerCount</Template>
+                </Column>
+                <Column Title="最近状态" TData="string" Width="170">
+                    <Template>
+                        @{
+                            var ok = context.LastResults?.Count(r => r.Success) ?? 0;
+                            var fail = context.LastResults?.Count(r => !r.Success) ?? 0;
+                        }
+                        @if (ok == 0 && fail == 0)
+                        {
+                            <Tag Color="@("default")">未验证</Tag>
+                        }
+                        else if (fail == 0)
+                        {
+                            <Tag Color="@("green")">全部正常（@ok）</Tag>
+                        }
+                        else
+                        {
+                            <Tag Color="@("orange")">正常 @ok / 失败 @fail</Tag>
+                        }
+                    </Template>
+                </Column>
+                <Column Title="更新时间" TData="DateTime" Width="180">
+                    <Template>@context.UpdatedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss")</Template>
+                </Column>
+                <ActionColumn Title="操作" Width="430">
+                    <Space>
+                        <SpaceItem><Button Size="ButtonSize.Small" OnClick="@(() => OpenServers(context))">查看服务器</Button></SpaceItem>
+                        <SpaceItem><Button Size="ButtonSize.Small" Disabled="@(!CurrentUser.CanEditAgent(context))" OnClick="@(() => OpenEditor(context))">编辑配置</Button></SpaceItem>
+                        <SpaceItem><Button Size="ButtonSize.Small" Disabled="@(!CurrentUser.CanEditAgent(context))" OnClick="@(() => VerifyConnection(context))">验证连接</Button></SpaceItem>
+                        <SpaceItem><Button Size="ButtonSize.Small" Disabled="@(!CurrentUser.CanEditAgent(context))" OnClick="@(() => Reinstall(context))">重装</Button></SpaceItem>
+                        <SpaceItem>
+                            <Popconfirm Title="确认删除该 Agent 客户端" OnConfirm="@(() => DeleteAgent(context))">
+                                <Button Size="ButtonSize.Small" Danger="true" Disabled="@(!CurrentUser.CanEditAgent(context))">删除</Button>
+                            </Popconfirm>
+                        </SpaceItem>
+                    </Space>
+                </ActionColumn>
+            </ChildContent>
+        </Table>
+    </div>
+</div>
+
+@* ---------------- 服务器列表弹窗 ---------------- *@
+<Modal Title="@("服务器列表 - " + (_serversModel?.Name ?? string.Empty))"
+       @bind-Visible="_serversVisible"
+       Width="860"
+       OnOk="@(() => _serversVisible = false)"
+       OnCancel="@(() => _serversVisible = false)"
+       OkText="@("关闭")">
+    @if (_serversModel != null)
+    {
+        <Table TItem="AgentServerItem" DataSource="_serversModel.Servers" Size="TableSize.Small" ScrollX="780">
+            <ChildContent>
+                <Column Title="主机" TData="string" Width="170">
+                    <Template><span class="srv-host">@context.Host</span></Template>
+                </Column>
+                <Column Title="通道" TData="string" Width="90">
+                    <Template><Tag Color="@(context.IsWinRm ? "geekblue" : "cyan")">@(context.IsWinRm ? "WinRM" : "SSH")</Tag></Template>
+                </Column>
+                <Column Title="端口" TData="int" Width="80">
+                    <Template>@context.EffectivePort</Template>
+                </Column>
+                <Column Title="账号" @bind-Field="@context.UserName" Width="130" />
+                <Column Title="安装目录" TData="string">
+                    <Template><span class="srv-meta">@context.EffectiveInstallDir(_serversModel.OsType)</span></Template>
+                </Column>
+                <Column Title="最近结果" TData="string" Width="120">
+                    <Template>
+                        @{ var r = ResultFor(_serversModel, context.Host); }
+                        @if (r == null)
+                        {
+                            <Tag Color="@("default")">未验证</Tag>
+                        }
+                        else if (r.Success)
+                        {
+                            <Tag Color="@("green")">✓ 正常</Tag>
+                        }
+                        else
+                        {
+                            <span title="@r.Msg"><Tag Color="@("red")">✗ 失败</Tag></span>
+                        }
+                    </Template>
+                </Column>
+            </ChildContent>
+        </Table>
+    }
+</Modal>
+
+@* ---------------- 手工安装教程 / 排错手册 ---------------- *@
+<Modal Title="手工安装教程 / 排错手册"
+       @bind-Visible="_manualVisible"
+       Width="900"
+       OnOk="@(() => _manualVisible = false)"
+       OnCancel="@(() => _manualVisible = false)"
+       OkText="@("关闭")">
+    <Tabs @bind-ActiveKey="_manualTab">
+        <TabPane Key="win" Tab="Windows 手工安装">
+            <div class="manual">
+                <h4>一、准备产物</h4>
+                <p>在 AntDeployWeb 项目执行 <code>publish-agents.ps1</code> 后，Windows 产物位于 <code>AntDeployWeb/AgentService/Windows</code>，含：</p>
+                <ul>
+                    <li><code>AntDeployAgentWindowsService.exe</code>（自包含，目标机免装 .NET 运行时）</li>
+                    <li><code>agentsettings.json</code>（配置模板）</li>
+                    <li><code>_deploy_end_.bat</code>（服务安装脚本模板）</li>
+                </ul>
+                <p>将上述文件复制到目标机安装目录（默认 <code>C:\AntDeploy\Agent</code>）。</p>
+
+                <h4>二、修改配置</h4>
+                <p>用记事本打开 <code>agentsettings.json</code>，按需修改：</p>
+                <pre>{
+  "Token": "AntDeploy@@publish#",
+  "Port": 8091,
+  "DeployDir": "",
+  "NeedBackUp": true,
+  "BackUpLimit": 0,
+  "MacWhiteList": "",
+  "OldPublishLimit": 10,
+  "ClearOldPublishFolderOverDays": 10
+}</pre>
+                <div class="note">改 Port 后需重启服务才会重新监听；Token / 白名单 / 备份等改后热生效（无需重启）。</div>
+
+                <h4>三、注册为 Windows 服务</h4>
+                <p>方式 A（推荐，nssm）：以管理员身份打开 cmd，执行：</p>
+                <pre>nssm install AntDeployAgentWindowsService "C:\AntDeploy\Agent\AntDeployAgentWindowsService.exe"
+nssm set AntDeployAgentWindowsService AppDirectory "C:\AntDeploy\Agent"
+nssm start AntDeployAgentWindowsService</pre>
+                <p>方式 B（sc.exe，无 nssm 时）：</p>
+                <pre>sc create AntDeployAgentWindowsService binPath= "C:\AntDeploy\Agent\AntDeployAgentWindowsService.exe" start= auto
+sc start AntDeployAgentWindowsService</pre>
+                <div class="note">若目录中没有 nssm.exe，可先双击运行一次 AntDeployAgentWindowsService.exe（会把内嵌的 nssm.exe 释放到同目录），或直接用方式 B。</div>
+
+                <h4>四、放行防火墙端口（默认 8091）</h4>
+                <pre>netsh advfirewall firewall add rule name="AntDeployAgent" dir=in action=allow protocol=TCP localport=8091</pre>
+
+                <h4>五、本机验证</h4>
+                <pre>curl http://127.0.0.1:8091/version</pre>
+                <div class="ok">返回版本号（如 7.3）即表示 Agent 已正常运行。</div>
+            </div>
+        </TabPane>
+
+        <TabPane Key="linux" Tab="Linux 手工安装">
+            <div class="manual">
+                <h4>一、准备产物</h4>
+                <p>Linux 产物位于 <code>AntDeployWeb/AgentService/Linux</code>，含 <code>AntDeployAgentLinuxService</code>（可执行）、<code>AntAgent.service</code>、<code>agentsettings.json</code>。复制到安装目录（默认 <code>/opt/antdeploy/agent</code>）：</p>
+                <pre>mkdir -p /opt/antdeploy/agent
+cp AntDeployAgentLinuxService AntAgent.service agentsettings.json /opt/antdeploy/agent/
+chmod +x /opt/antdeploy/agent/AntDeployAgentLinuxService</pre>
+
+                <h4>二、修改配置</h4>
+                <p>编辑 <code>/opt/antdeploy/agent/agentsettings.json</code>（字段同 Windows）。改 Port 需重启服务。</p>
+
+                <h4>三、安装 systemd 服务</h4>
+                <p>先把 <code>AntAgent.service</code> 中的路径改成实际安装目录：</p>
+                <pre>[Unit]
+Description=AntAgent
+
+[Service]
+Type=notify
+WorkingDirectory=/opt/antdeploy/agent
+ExecStart=/opt/antdeploy/agent/AntDeployAgentLinuxService
+SyslogIdentifier=AntAgent
+Restart=always
+RestartSec=5
+KillSignal=SIGINT
+
+[Install]
+WantedBy=multi-user.target</pre>
+                <p>再安装并启动：</p>
+                <pre>cp /opt/antdeploy/agent/AntAgent.service /etc/systemd/system/AntAgent.service
+systemctl daemon-reload
+systemctl enable AntAgent
+systemctl start AntAgent
+systemctl status AntAgent</pre>
+
+                <h4>四、放行防火墙端口</h4>
+                <pre># firewalld
+firewall-cmd --add-port=8091/tcp --permanent
+firewall-cmd --reload
+# 或 ufw
+ufw allow 8091/tcp</pre>
+
+                <h4>五、本机验证</h4>
+                <pre>curl http://127.0.0.1:8091/version</pre>
+
+                <h4>无 systemd 的老系统（回退）</h4>
+                <pre>nohup /opt/antdeploy/agent/AntDeployAgentLinuxService &gt;/var/log/antagent.log 2&gt;&amp;1 &amp;</pre>
+                <div class="note">回退方式重启后不自启，可写入 /etc/rc.local 或 init.d 脚本。</div>
+            </div>
+        </TabPane>
+
+        <TabPane Key="trouble" Tab="排错手册（装成功但连不通）">
+            <div class="manual">
+                <h4>核心思路：先本机、后外机，逐层定位</h4>
+                <p>“安装成功但连不通”绝大多数是 <b>服务未起</b>、<b>端口/防火墙未放行</b> 或 <b>Token 不匹配</b>。按下面顺序排查：</p>
+
+                <h4>第 1 步：确认服务在运行</h4>
+                <pre># Windows
+sc query AntDeployAgentWindowsService
+# Linux
+systemctl status AntAgent</pre>
+                <p>状态应为 RUNNING / active (running)。若未运行，看安装目录日志，或 Linux 执行 <code>journalctl -u AntAgent -n 100</code>。</p>
+
+                <h4>第 2 步：在服务器“本机”验证 HTTP</h4>
+                <pre>curl http://127.0.0.1:8091/version</pre>
+                <ul>
+                    <li><b>本机通</b> → 服务与端口正常，问题在网络/防火墙，转第 3 步。</li>
+                    <li><b>本机不通</b> → 服务没起或 Port 配错；核对 agentsettings.json 的 Port，确认改 Port 后已重启服务。</li>
+                </ul>
+
+                <h4>第 3 步：从“外机”（AntDeployWeb 所在机器）验证</h4>
+                <pre>curl http://AGENT_IP:8091/version</pre>
+                <div class="note">本机通、外机不通 = 典型的防火墙 / 安全组未放行。请在目标机放行 TCP 8091（见安装教程第四步），并在云控制台安全组放行同一端口。</div>
+
+                <h4>第 4 步：端口占用 / 监听检查</h4>
+                <pre># Windows
+netstat -ano | findstr 8091
+# Linux
+ss -lntp | grep 8091</pre>
+
+                <h4>第 5 步：Token 不匹配</h4>
+                <p><code>/version</code> 不需要 Token，但 <code>/publish</code>、<code>/config</code> 需要。Web 端配置的 Token 必须与 agentsettings.json 的 Token 完全一致，否则返回 “request Token is invaild”。</p>
+
+                <h4>常见结论对照</h4>
+                <ul>
+                    <li>本机 curl 不通：服务未起 / Port 错 / 改 Port 未重启。</li>
+                    <li>本机通、外机不通：防火墙或云安全组未放行端口。</li>
+                    <li>/version 通但发布报 Token 错：两端 Token 不一致。</li>
+                    <li>WinRM 通道连不上：确认 AntDeployWeb 宿主为 Windows、目标机已启用 WinRM（<code>winrm quickconfig</code>）、5985/5986 已放行；Linux 宿主请改用 SSH 通道。</li>
+                </ul>
+            </div>
+        </TabPane>
+    </Tabs>
+</Modal>
+
+@* ---------------- 在线安装向导（W1.9） ---------------- *@
+<AgentInstallWizard @bind-Visible="_wizardVisible"
+                    Editing="_wizardEditing"
+                    Teams="_teams"
+                    OnSaved="OnWizardSaved" />
+
+@* ---------------- 配置编辑器 + 在线同步（W1.10） ---------------- *@
+<AgentConfigEditor @bind-Visible="_editorVisible"
+                   Model="_editorModel"
+                   OnSaved="OnWizardSaved" />
+
+@* ---------------- 连接验证进度弹窗（W1.8 独立复验） ---------------- *@
+<Modal Title="@("连接验证 - " + (_verifyModel?.Name ?? string.Empty))"
+       Visible="_verifyVisible"
+       OnCancel="@(() => _verifyVisible = false)"
+       Footer="null"
+       Width="880"
+       MaskClosable="false">
+    <DeployLogConsole Lines="VerifyLogSnapshot"
+                      Live="_verifyRunning"
+                      Header="验证日志 · VERIFY LOG"
+                      SubHeader="@(_verifyRunning ? "验证中…" : (_verifyResults.Count > 0 ? "已完成" : "等待开始"))"
+                      Height="360px" />
+    @if (_verifyResults.Count > 0)
+    {
+        <div style="margin-top:14px;">
+            @foreach (var r in _verifyResults)
+            {
+                <div class="result-row @(r.Success ? "result-row--ok" : "result-row--fail")">
+                    <span class="result-row__icon">@(r.Success ? "✓" : "✗")</span>
+                    <span><span class="result-row__host">@r.Host</span><span class="result-row__msg">@r.Msg</span></span>
+                </div>
+            }
+        </div>
+    }
+    <div class="wizard-footer">
+        @if (_verifyRunning)
+        {
+            <Button Danger="true" OnClick="CancelVerify">取消</Button>
+        }
+        else
+        {
+            <Button OnClick="@(() => _verifyVisible = false)">关闭</Button>
+            <Button Type="ButtonType.Primary" Icon="reload" OnClick="@(() => RunVerifyAsync(_verifyModel))">重新验证</Button>
+        }
+    </div>
+</Modal>
+
+@code {
+    private List<AgentClient> _agents = new();
+    private List<TeamEntity> _teams = new();
+
+    // 手册弹窗
+    private bool _manualVisible;
+    private string _manualTab = "win";
+
+    // 服务器列表弹窗
+    private bool _serversVisible;
+    private AgentClient? _serversModel;
+
+    // 在线安装向导（W1.9）
+    private bool _wizardVisible;
+    private AgentClient? _wizardEditing;
+
+    // 配置编辑器 + 在线同步（W1.10）
+    private bool _editorVisible;
+    private AgentClient? _editorModel;
+
+    // 连接验证弹窗（W1.8 独立复验）：日志经后台线程回调追加，锁内改集合 + InvokeAsync 节流渲染
+    private bool _verifyVisible;
+    private AgentClient? _verifyModel;
+    private bool _verifyRunning;
+    private List<HostResult> _verifyResults = new();
+    private readonly List<LogEntry> _verifyLogs = new();
+    private readonly object _verifyLogLock = new();
+    private int _verifyRenderQueued;
+    private CancellationTokenSource? _verifyCts;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await CurrentUser.LoadAsync();
+        Reload();
+    }
+
+    private void Reload()
+    {
+        _teams = Users.ListTeams();
+        _agents = CurrentUser.FilterVisibleAgents(AgentStore.GetAll());
+    }
+
+    private void OpenManual()
+    {
+        _manualTab = "win";
+        _manualVisible = true;
+    }
+
+    private void OpenServers(AgentClient agent)
+    {
+        _serversModel = agent;
+        _serversVisible = true;
+    }
+
+    private void DeleteAgent(AgentClient agent)
+    {
+        if (!CurrentUser.CanEditAgent(agent)) { Message.Warning("无权删除该 Agent 客户端"); return; }
+        AgentStore.Delete(agent.Id);
+        Reload();
+        Message.Success("已删除");
+    }
+
+    // ---------------- 在线安装向导 ----------------
+
+    private void OpenInstall()
+    {
+        _wizardEditing = null;
+        _wizardVisible = true;
+    }
+
+    private void Reinstall(AgentClient agent)
+    {
+        if (!CurrentUser.CanEditAgent(agent)) { Message.Warning("无权操作该 Agent 客户端"); return; }
+        _wizardEditing = agent; // 向导内部会克隆，不改动列表对象
+        _wizardVisible = true;
+    }
+
+    private void OnWizardSaved()
+    {
+        Reload();
+    }
+
+    private void OpenEditor(AgentClient agent)
+    {
+        if (!CurrentUser.CanEditAgent(agent)) { Message.Warning("无权编辑该 Agent 客户端"); return; }
+        _editorModel = agent; // 编辑器内部会克隆其 Config，不改动列表对象
+        _editorVisible = true;
+    }
+
+    // ---------------- 连接验证（W1.8 独立复验） ----------------
+
+    private void VerifyConnection(AgentClient agent)
+    {
+        if (!CurrentUser.CanEditAgent(agent)) { Message.Warning("无权操作该 Agent 客户端"); return; }
+        _verifyModel = agent;
+        _verifyResults = new List<HostResult>();
+        lock (_verifyLogLock) _verifyLogs.Clear();
+        _verifyVisible = true;
+        _ = RunVerifyAsync(agent);
+    }
+
+    private async Task RunVerifyAsync(AgentClient? agent)
+    {
+        if (agent == null || _verifyRunning) return;
+        _verifyRunning = true;
+        _verifyResults = new List<HostResult>();
+        lock (_verifyLogLock) _verifyLogs.Clear();
+        try { _verifyCts?.Dispose(); } catch { }
+        _verifyCts = new CancellationTokenSource();
+        StateHasChanged();
+        try
+        {
+            var results = await Verifier.VerifyAsync(agent, AppendVerifyLog, _verifyCts.Token);
+            _verifyResults = results;
+            agent.LastResults = results;   // 更新最近状态并持久化
+            AgentStore.Save(agent);
+            var ok = results.Count(r => r.Success);
+            AppendVerifyLog("===== 验证完成：" + ok + "/" + results.Count + " 台连接正常 =====");
+            await InvokeAsync(Reload);
+        }
+        catch (OperationCanceledException)
+        {
+            AppendVerifyLog("[Warn] 验证已取消");
+        }
+        catch (Exception ex)
+        {
+            AppendVerifyLog("[Error] 验证异常：" + ex.Message);
+        }
+        finally
+        {
+            _verifyRunning = false;
+            _ = InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private void CancelVerify()
+    {
+        try { _verifyCts?.Cancel(); } catch { }
+    }
+
+    private void AppendVerifyLog(string? msg)
+    {
+        if (msg == null) return;
+        var entry = new LogEntry
+        {
+            Time = DateTime.Now.ToString("HH:mm:ss"),
+            Text = msg,
+            Css = ClassifyVerifyLog(msg)
+        };
+        lock (_verifyLogLock)
+        {
+            _verifyLogs.Add(entry);
+            if (_verifyLogs.Count > 2000) _verifyLogs.RemoveAt(0);
+        }
+        if (System.Threading.Interlocked.CompareExchange(ref _verifyRenderQueued, 1, 0) == 0)
+        {
+            _ = Task.Delay(150).ContinueWith(_ => InvokeAsync(() =>
+            {
+                System.Threading.Interlocked.Exchange(ref _verifyRenderQueued, 0);
+                StateHasChanged();
+            }));
+        }
+    }
+
+    private List<LogEntry> VerifyLogSnapshot
+    {
+        get { lock (_verifyLogLock) return _verifyLogs.ToList(); }
+    }
+
+    private static string ClassifyVerifyLog(string msg)
+    {
+        if (string.IsNullOrEmpty(msg)) return string.Empty;
+        if (msg.Contains("[Error]") || msg.Contains("✗") || msg.Contains("失败") || msg.Contains("Fail")) return "log-error";
+        if (msg.Contains("[Warn]") || msg.Contains("警告")) return "log-warn";
+        return string.Empty;
+    }
+
+    private static HostResult? ResultFor(AgentClient? c, string host)
+    {
+        if (c?.LastResults == null || string.IsNullOrEmpty(host)) return null;
+        return c.LastResults.FirstOrDefault(r => string.Equals(r.Host, host, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private string TeamName(string? teamId)
+    {
+        if (string.IsNullOrEmpty(teamId)) return "（未分配）";
+        return _teams.FirstOrDefault(t => t.Id == teamId)?.Name ?? teamId;
+    }
+
+    private static string OsText(string os) =>
+        string.Equals(os, "linux", StringComparison.OrdinalIgnoreCase) ? "Linux" : "Windows";
+
+    private static string OsColor(string os) =>
+        string.Equals(os, "linux", StringComparison.OrdinalIgnoreCase) ? "purple" : "blue";
+}

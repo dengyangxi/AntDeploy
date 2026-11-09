@@ -374,7 +374,7 @@ namespace AntDeployWinform.Util
                 }
 
                 //获取该目录下的所有日期文件夹
-                List<SftpFile> folderList;
+                List<ISftpFile> folderList;
                 if (pageNumber < 1)
                 {
                     folderList = _sftpClient.ListDirectory(destinationFolder).Where(r => r.IsDirectory).
@@ -438,7 +438,7 @@ namespace AntDeployWinform.Util
                 }
 
                 //获取该目录下的所有日期文件夹
-                List<SftpFile> folderList;
+                List<ISftpFile> folderList;
                 if (pageNumber < 1)
                 {
                     folderList = _sftpClient.ListDirectory(destinationFolder).Where(r => r.IsDirectory).

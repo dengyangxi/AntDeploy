@@ -1,0 +1,555 @@
+@page "/"
+@page "/projects"
+@attribute [Authorize]
+@implements IDisposable
+@inject IConfigStore Store
+@inject DeployService Deploy
+@inject DeploySessionManager SessionManager
+@inject CurrentUserService CurrentUser
+@inject ProjectTeamService ProjectTeams
+@inject UserService Users
+@inject NavigationManager Nav
+@inject MessageService Message
+
+<div class="page-head">
+    <div class="page-head__titles">
+        <div class="page-head__title"><Icon Type="appstore" />项目管理</div>
+        <div class="page-head__sub">管理部署项目：Git 拉取 · 编译发布 · 多环境部署与回滚</div>
+    </div>
+    <div class="page-head__actions">
+        @if (CurrentUser.CanAddProject)
+        {
+            <Button Type="ButtonType.Primary" Icon="plus" OnClick="OpenCreate">新建项目</Button>
+        }
+    </div>
+</div>
+
+<div class="panel">
+    <div class="panel__head">
+        <span class="panel__title"><Icon Type="profile" />项目列表</span>
+        <span class="chip"><span class="chip__k">项目数</span><span class="chip__v">@Profiles.Count</span></span>
+    </div>
+    <div class="panel__body" style="padding:0;">
+        <Table TItem="DeployProfile"
+               DataSource="Profiles"
+               Size="TableSize.Middle"
+               ScrollX="1260">
+            <ChildContent>
+                <Column Title="项目名称" @bind-Field="@context.Name" Width="200" />
+                <Column Title="Git 地址" TData="string" Width="260">
+                    <Template>@context.Git.RepositoryUrl</Template>
+                </Column>
+                <Column Title="最后发布时间" TData="string" Width="180">
+                    <Template>@FormatTime(context.LastPublishTime)</Template>
+                </Column>
+                <Column Title="最后发布分支" TData="string" Width="150">
+                    <Template>
+                        @if (!string.IsNullOrWhiteSpace(context.LastPublishBranch))
+                        {
+                            <span class="chip chip--brand"><span class="chip__v">@context.LastPublishBranch</span></span>
+                        }
+                        else
+                        {
+                            <span style="color:#bbb;">无</span>
+                        }
+                    </Template>
+                </Column>
+                <Column Title="上次耗时" TData="string" Width="140">
+                    <Template>
+                        @{
+                            var cost = GetLastCost(context.Id);
+                        }
+                        @if (cost != null && cost.Total > 0)
+                        {
+                            <Tooltip>
+                                <TitleTemplate>
+                                    <div style="white-space:nowrap;">
+                                        <div>拉取：@FmtDur(cost.Pull)</div>
+                                        <div>编译：@FmtDur(cost.Build)</div>
+                                        <div>打包：@FmtDur(cost.Package)</div>
+                                        <div>上传：@FmtDur(cost.Upload)</div>
+                                        <div>部署：@FmtDur(cost.Deploy)</div>
+                                    </div>
+                                </TitleTemplate>
+                                <ChildContent>
+                                    <span style="cursor:default;border-bottom:1px dashed #bbb;">@FmtDur(cost.Total)</span>
+                                </ChildContent>
+                            </Tooltip>
+                        }
+                        else
+                        {
+                            <span style="color:#bbb;">-</span>
+                        }
+                    </Template>
+                </Column>
+                <ActionColumn Title="操作" Width="420">
+                    <Space>
+                        @if (CurrentUser.CanPublishProject(context.Id))
+                        {
+                            <SpaceItem>
+                                <Button Size="ButtonSize.Small" Type="ButtonType.Primary" Icon="rocket"
+                                        Disabled="@IsRunning(context.Id)" OnClick="@(() => OpenPublish(context))">发布</Button>
+                            </SpaceItem>
+                        }
+                        <SpaceItem>
+                            <Button Size="ButtonSize.Small" OnClick="@(() => Open(context))">配置 / 部署</Button>
+                        </SpaceItem>
+                        @if (CurrentUser.CanDeleteProject(context.Id))
+                        {
+                            <SpaceItem>
+                                <Popconfirm Title="确认删除该项目配置" OnConfirm="@(() => Delete(context))">
+                                    <Button Size="ButtonSize.Small" Danger="true">删除</Button>
+                                </Popconfirm>
+                            </SpaceItem>
+                        }
+                    </Space>
+                    @{
+                        var session = GetSession(context.Id);
+                    }
+                    @if (session != null)
+                    {
+                        <DeployProgressPanel Session="session"
+                                             OnOpenLog="@(() => OpenLog(context))"
+                                             OnCancel="@(() => CancelSession(session.Id))"
+                                             OnViewHistory="@(() => ViewHistory(context.Id))"
+                                             OnClear="@(() => ClearSession(context.Id))" />
+                    }
+                </ActionColumn>
+            </ChildContent>
+        </Table>
+    </div>
+</div>
+
+<Modal Title="新建项目"
+       @bind-Visible="_createVisible"
+       OnOk="Create"
+       OnCancel="@(() => _createVisible = false)"
+       OkText="@("创建")"
+       CancelText="@("取消")">
+    <div style="margin-bottom:12px;">
+        <div style="margin-bottom:4px;">项目名称</div>
+        <Input @bind-Value="_newName" Placeholder="例如：MyWebApi" />
+    </div>
+    <div style="margin-bottom:12px;">
+        <div style="margin-bottom:4px;">Git 地址（可选，稍后可在详情页填写）</div>
+        <Input @bind-Value="_newRepo" Placeholder="https://github.com/xxx/yyy.git" />
+    </div>
+    @if (CurrentUser.IsSuperAdmin)
+    {
+        <div>
+            <div style="margin-bottom:4px;">所属团队（普通用户/团队管理员仅能看到本项目所属团队的项目）</div>
+            <select class="native-select" value="@_newTeamId" @onchange="OnNewTeamChange">
+                <option value="">（暂不分配）</option>
+                @foreach (var t in _teams)
+                {
+                    <option value="@t.Id">@t.Name</option>
+                }
+            </select>
+        </div>
+    }
+    else if (CurrentUser.IsTeamAdmin)
+    {
+        <div class="form-hint">项目将自动归属你所在的团队。</div>
+    }
+</Modal>
+
+<Modal Title="一键发布"
+       @bind-Visible="_publishVisible"
+       OnOk="StartPublish"
+       OnCancel="@(() => _publishVisible = false)"
+       OkText="@("立即发布")"
+       CancelText="@("取消")"
+       Width="600"
+       MaskClosable="false">
+    @if (_pubProfile != null)
+    {
+        <div class="pub-form">
+            <div class="pub-form__item">
+                <div class="pub-form__label">发布环境（对应「环境与服务器」中的当前环境，默认发布该环境下所有 Agent 服务器）</div>
+                @if (_pubProfile.Envs.Count == 0)
+                {
+                    <div class="form-hint">该项目尚未配置环境，请到「配置 / 部署 → 环境与服务器」新增环境并添加服务器。</div>
+                }
+                else
+                {
+                    <select class="native-select" style="max-width:280px;" value="@_pubEnvName" @onchange="OnPubEnvChange">
+                        @foreach (var e in _pubProfile.Envs)
+                        {
+                            <option value="@e.Name">@e.Name</option>
+                        }
+                    </select>
+                }
+            </div>
+
+            <div class="pub-form__item">
+                <div class="pub-form__label">部署类型</div>
+                <select class="native-select" style="max-width:280px;" value="@_pubType" @onchange="OnPubTypeChange">
+                    @foreach (var t in _deployTypes)
+                    {
+                        <option value="@t">@t</option>
+                    }
+                </select>
+            </div>
+
+            @if (_pubType == "iis" && string.IsNullOrWhiteSpace(_pubProfile.Iis?.WebSiteName))
+            {
+                <div class="pub-form__item">
+                    <div class="form-hint" style="color:#d4380d;background:#fff2f0;border:1px solid #ffccc7;border-radius:6px;padding:8px 12px;">
+                        IIS 发布缺少必填项「网站名称(WebSiteName)」，请先到项目详情页「部署回滚」中填写后再发布。
+                        <Button Size="ButtonSize.Small" Type="ButtonType.Link" OnClick="@(() => GoFillIis(_pubProfile))">去填写</Button>
+                    </div>
+                </div>
+            }
+
+            <div class="pub-form__item">
+                <div class="pub-form__label">分支 Branch（可下拉选择 / 手工输入 / 模糊搜索）</div>
+                <BranchPicker RepositoryUrl="@(_pubProfile.Git?.RepositoryUrl)"
+                              UserName="@(_pubProfile.Git?.UserName)"
+                              Password="@(_pubProfile.Git?.Password)"
+                              @bind-Value="_pubBranch"
+                              DefaultValue="@PubDefaultBranch"
+                              ListId="pub-branch-list"
+                              Placeholder="选择或输入分支，发布前默认拉取该分支最新代码" />
+            </div>
+
+            <div class="pub-form__item">
+                <div class="pub-form__label">部署备注 Remark（可选）</div>
+                <Input @bind-Value="_pubRemark" Placeholder="本次部署说明" Style="max-width:280px;" />
+            </div>
+
+            <div class="pub-form__item">
+                <div class="pub-form__label">目标服务器</div>
+                @if (_pubServers.Count == 0)
+                {
+                    <div class="form-hint" style="color:#d4380d;">当前环境没有配置 Agent 服务器，请到「配置 / 部署 → 环境与服务器」添加后再发布。</div>
+                }
+                else
+                {
+                    <div class="form-hint">将发布到以下 @_pubServers.Count 台服务器：</div>
+                    <div style="max-height:120px;overflow-y:auto;border:1px solid #eee;border-radius:4px;padding:8px;">
+                        @foreach (var s in _pubServers)
+                        {
+                            <div style="font-size:12px;">· @ServerDisplay(s)</div>
+                        }
+                    </div>
+                }
+            </div>
+        </div>
+    }
+</Modal>
+
+<Modal Title="@($"实时日志 · {_logProfileName}")"
+       @bind-Visible="_logVisible"
+       Footer="null"
+       Width="860">
+    <DeployLogConsole Lines="LogSnapshot"
+                      Live="true"
+                      SubHeader="@LogModalSubHeader"
+                      Height="420px" />
+</Modal>
+
+@code {
+    private List<DeployProfile> Profiles = new();
+    private List<TeamEntity> _teams = new();
+    private bool _createVisible;
+    private string _newName = string.Empty;
+    private string _newRepo = string.Empty;
+    private string _newTeamId = string.Empty;
+
+    private readonly string[] _deployTypes = { "iis", "windowservice", "linux", "docker" };
+
+    // 一键发布弹窗状态
+    private bool _publishVisible;
+    private DeployProfile _pubProfile;
+    private string _pubEnvName = string.Empty;
+    private Env _pubEnv;
+    private string _pubType = "iis";
+    private string _pubBranch = string.Empty;
+    private string _pubRemark = string.Empty;
+    private List<Server> _pubServers = new();
+
+    // 会话状态缓存（key = profileId，value = 最新会话）
+    private readonly Dictionary<string, DeploySession> _sessionCache = new();
+    private int _renderQueued;
+
+    // 上次发布耗时缓存（key = profileId），Reload 时批量加载，发布完成事件即时更新
+    private Dictionary<string, DeploySessionManager.LastCost> _lastCost = new();
+
+    // 实时日志浮窗状态
+    private bool _logVisible;
+    private string _logProfileId = string.Empty;
+    private string _logProfileName = string.Empty;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await CurrentUser.LoadAsync();
+        Reload();
+        // 订阅会话更新事件
+        SessionManager.OnSessionUpdated += HandleSessionUpdated;
+        // 加载所有运行中的会话到缓存
+        foreach (var s in SessionManager.GetAllRunningSessions())
+        {
+            _sessionCache[s.ProfileId] = s;
+        }
+    }
+
+    private void Reload()
+    {
+        var all = Store.GetProfiles();
+        Profiles = CurrentUser.FilterVisible(all);
+        if (CurrentUser.IsSuperAdmin) _teams = Users.ListTeams();
+        // 批量加载各项目“上次发布耗时”（最近一条已完成的发布类会话，来自 DB 持久化）
+        _lastCost = SessionManager.GetLastCompletedTimings(Profiles.Select(p => p.Id));
+    }
+
+    private static string FormatTime(DateTime? t) =>
+        t.HasValue ? t.Value.ToString("yyyy-MM-dd HH:mm:ss") : "-";
+
+    private static string ServerDisplay(Server s) =>
+        string.IsNullOrWhiteSpace(s.NickName) ? s.Host : $"{s.NickName} ({s.Host})";
+
+    // ---------------- 会话状态 ----------------
+
+    private DeploySession GetSession(string profileId)
+    {
+        return _sessionCache.TryGetValue(profileId, out var s) ? s : null;
+    }
+
+    private bool IsRunning(string profileId)
+    {
+        var s = GetSession(profileId);
+        return s != null && s.IsRunning;
+    }
+
+    private void HandleSessionUpdated(string sessionId, DeploySession session)
+    {
+        // 更新缓存
+        _sessionCache[session.ProfileId] = session;
+        // 发布类会话完成时，就地更新“上次耗时”缓存（避免整表重查 DB）
+        if (!session.IsRunning && _publishOps.Contains(session.Operation) && session.EndTime.HasValue)
+        {
+            var total = (long)Math.Max(0, (session.EndTime.Value - session.StartTime).TotalMilliseconds);
+            _lastCost[session.ProfileId] = new DeploySessionManager.LastCost(
+                total, session.PullMs, session.BuildMs, session.PackageMs, session.UploadMs, session.DeployMs);
+        }
+        // 节流渲染
+        ThrottledRender();
+    }
+
+    /// <summary>计入“上次耗时”列的操作类型（纯拉取/编译/回滚/构建镜像不计入）。</summary>
+    private static readonly HashSet<string> _publishOps = new() { "quick_deploy", "deploy" };
+
+    private DeploySessionManager.LastCost GetLastCost(string profileId) =>
+        _lastCost.TryGetValue(profileId, out var c) ? c : null;
+
+    /// <summary>耗时格式化：0/无 → “-”；≥1h → “Xh Ym”；≥60s → “Xm Ys”；否则 “Ys”。</summary>
+    private static string FmtDur(long ms)
+    {
+        if (ms <= 0) return "-";
+        var ts = TimeSpan.FromMilliseconds(ms);
+        if (ts.TotalHours >= 1) return $"{(int)ts.TotalHours}h {ts.Minutes}m";
+        if (ts.TotalSeconds >= 60) return $"{(int)ts.TotalMinutes}m {ts.Seconds}s";
+        return $"{Math.Max(1, (int)Math.Round(ts.TotalSeconds))}s";
+    }
+
+    // ---------------- 实时日志浮窗 ----------------
+
+    /// <summary>打开某项目的实时日志浮窗（运行中的行才有入口）。</summary>
+    private void OpenLog(DeployProfile profile)
+    {
+        _logProfileId = profile.Id;
+        _logProfileName = profile.Name;
+        _logVisible = true;
+    }
+
+    /// <summary>浮窗对应的会话（来自共享缓存，随 OnSessionUpdated 事件实时刷新）。</summary>
+    private DeploySession LogSession => GetSession(_logProfileId);
+
+    /// <summary>渲染线程安全地快照浮窗会话日志（后台线程在 LogLock 下追加）。</summary>
+    private List<LogEntry> LogSnapshot
+    {
+        get
+        {
+            var s = LogSession;
+            if (s == null) return new List<LogEntry>();
+            lock (s.LogLock)
+            {
+                return s.Logs.ToList();
+            }
+        }
+    }
+
+    private string LogModalSubHeader
+    {
+        get
+        {
+            var s = LogSession;
+            if (s == null) return string.Empty;
+            return s.OperationText + " · " + s.StatusText
+                + (string.IsNullOrWhiteSpace(s.TriggeredBy) ? "" : " · 触发人 " + s.TriggeredBy);
+        }
+    }
+
+    private void ClearSession(string profileId)
+    {
+        var s = GetSession(profileId);
+        if (s != null && !s.IsRunning)
+        {
+            _sessionCache.Remove(profileId);
+            StateHasChanged();
+        }
+    }
+
+    private void CancelSession(string sessionId)
+    {
+        SessionManager.RequestCancel(sessionId);
+        Message.Info("已请求停止发布...");
+    }
+
+    private void ViewHistory(string profileId)
+    {
+        Nav.NavigateTo($"/history?profile={profileId}");
+    }
+
+    // ---------------- 新建 / 删除 / 打开 ----------------
+
+    private void OpenCreate()
+    {
+        _newName = string.Empty;
+        _newRepo = string.Empty;
+        _newTeamId = CurrentUser.IsTeamAdmin ? (CurrentUser.TeamId ?? string.Empty) : string.Empty;
+        _createVisible = true;
+    }
+
+    private void OnNewTeamChange(ChangeEventArgs e) => _newTeamId = e.Value?.ToString() ?? string.Empty;
+
+    private void Create()
+    {
+        if (string.IsNullOrWhiteSpace(_newName))
+        {
+            Message.Error("请填写项目名称");
+            return;
+        }
+        var profile = new DeployProfile
+        {
+            Name = _newName.Trim()
+        };
+        if (!string.IsNullOrWhiteSpace(_newRepo)) profile.Git.RepositoryUrl = _newRepo.Trim();
+        Store.AddProfile(profile);
+        // 归属团队：团队管理员固定本团队；超管按所选团队（可空）
+        var teamId = CurrentUser.IsTeamAdmin
+            ? CurrentUser.TeamId
+            : (string.IsNullOrWhiteSpace(_newTeamId) ? null : _newTeamId);
+        ProjectTeams.SetTeamId(profile.Id, teamId);
+        _createVisible = false;
+        Reload();
+        Nav.NavigateTo($"/project/{profile.Id}");
+    }
+
+    private void Open(DeployProfile profile) => Nav.NavigateTo($"/project/{profile.Id}");
+
+    private void Delete(DeployProfile profile)
+    {
+        if (IsRunning(profile.Id)) { Message.Warning("该项目正在发布中，无法删除"); return; }
+        if (!CurrentUser.CanDeleteProject(profile.Id)) { Message.Warning("无权删除该项目"); return; }
+        Store.DeleteProfile(profile.Id);
+        ProjectTeams.DeleteMapping(profile.Id);
+        _sessionCache.Remove(profile.Id);
+        Reload();
+        Message.Success("已删除");
+    }
+
+    // ---------------- 一键发布弹窗 ----------------
+
+    private string PubDefaultBranch => string.IsNullOrWhiteSpace(_pubProfile?.LastPublishBranch)
+        ? (_pubProfile?.Git?.Branch ?? string.Empty)
+        : _pubProfile.LastPublishBranch;
+
+    private void OpenPublish(DeployProfile profile)
+    {
+        _pubProfile = profile;
+        _pubEnv = profile.Envs.FirstOrDefault();
+        _pubEnvName = _pubEnv?.Name ?? string.Empty;
+        _pubType = DeploySessionManager.NormalizeDeployType(profile.LastDeployType);
+        _pubBranch = PubDefaultBranch;
+        _pubRemark = string.Empty;
+        RefreshPubServers();
+        _publishVisible = true;
+    }
+
+    private void GoFillIis(DeployProfile profile)
+    {
+        _publishVisible = false;
+        Nav.NavigateTo($"/project/{profile.Id}?tab=deploy");
+    }
+
+    private void RefreshPubServers()
+    {
+        _pubServers = (_pubEnv?.ServerList ?? new List<Server>())
+            .Where(s => !string.IsNullOrWhiteSpace(s.Host))
+            .ToList();
+    }
+
+    private void OnPubEnvChange(ChangeEventArgs e)
+    {
+        _pubEnvName = e.Value?.ToString() ?? string.Empty;
+        _pubEnv = _pubProfile?.Envs.FirstOrDefault(x => x.Name == _pubEnvName);
+        RefreshPubServers();
+    }
+
+    private void OnPubTypeChange(ChangeEventArgs e) => _pubType = e.Value?.ToString() ?? "iis";
+
+    private void StartPublish()
+    {
+        if (_pubProfile == null) return;
+        var profile = _pubProfile;
+        var env = _pubEnv;
+        if (env == null) { Message.Error("请选择发布环境（该项目尚未配置环境）"); return; }
+        var servers = env.ServerList.Where(s => !string.IsNullOrWhiteSpace(s.Host)).ToList();
+        if (servers.Count == 0) { Message.Error("当前环境没有配置 Agent 服务器，请先到项目详情页添加"); return; }
+
+        var type = ParseType(_pubType);
+        // IIS 发布前拦截缺失 WebSiteName
+        if (type == PublishType.iis && string.IsNullOrWhiteSpace(profile.Iis?.WebSiteName))
+        {
+            Message.Error("IIS 发布缺少必填项「网站名称(WebSiteName)」，请先到项目详情页填写");
+            return;
+        }
+        var branch = string.IsNullOrWhiteSpace(_pubBranch) ? (profile.Git.Branch ?? string.Empty) : _pubBranch.Trim();
+        var remark = _pubRemark;
+
+        _publishVisible = false;
+
+        // 通过 SessionManager 启动后台发布（跨用户共享状态）
+        var triggeredBy = CurrentUser.UserName;
+        var sessionId = SessionManager.StartQuickDeploy(profile, env, servers, type, branch, remark, triggeredBy);
+        Message.Success($"发布已启动（会话 {sessionId.Substring(0, 8)}...），可在项目列表查看实时进度");
+    }
+
+    private static PublishType ParseType(string t) => t switch
+    {
+        "windowservice" => PublishType.windowservice,
+        "linux" => PublishType.linux,
+        "docker" => PublishType.docker,
+        _ => PublishType.iis
+    };
+
+    // 合并高频进度渲染
+    private void ThrottledRender()
+    {
+        if (System.Threading.Interlocked.CompareExchange(ref _renderQueued, 1, 0) == 0)
+        {
+            _ = Task.Delay(150).ContinueWith(_ => InvokeAsync(() =>
+            {
+                System.Threading.Interlocked.Exchange(ref _renderQueued, 0);
+                StateHasChanged();
+            }));
+        }
+    }
+
+    public void Dispose()
+    {
+        // 取消订阅
+        SessionManager.OnSessionUpdated -= HandleSessionUpdated;
+    }
+}

@@ -1,4 +1,6 @@
-﻿using System;
+﻿using AntDeployAgentWindows.WebApiCore;
+using AntDeployAgentWindows.WebSocketApp;
+using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
@@ -8,12 +10,11 @@ using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
+using AntDeployAgentWindows.Model;
+using AntDeployAgentWindows.Util;
 using Newtonsoft.Json;
-using AntDeployAgent.WebApiCore;
-using AntDeployAgent.WebSocketApp;
-using AntDeployAgent.Model;
 
-namespace AntDeployAgent.MyApp.Service
+namespace AntDeployAgentWindows.MyApp.Service
 {
     public abstract class PublishProviderBasicAPI : CommonProcessor, IPublishProviderAPI
     {
@@ -23,12 +24,36 @@ namespace AntDeployAgent.MyApp.Service
         private static readonly ConcurrentDictionary<string, ReaderWriterLockSlim> locker = new ConcurrentDictionary<string, ReaderWriterLockSlim>();
         public abstract string ProviderName { get; }
         public string LoggerKey { get; set; }
-        public WebSocket WebSocket { get; set; }
+        public WebSocketApp.WebSocket WebSocket { get; set; }
         public abstract string ProjectName { get; }
         public abstract string ProjectPublishFolder { get; }
         public abstract string DeployExcutor(FormHandler.FormItem fileItem);
         public abstract string CheckData(FormHandler formHandler);
         private FormHandler _formHandler;
+
+        // ===== 发布回调（下负载/上负载）与两阶段发布字段（均为可选，缺省即原行为） =====
+        /// <summary>更新前回调地址（下负载）：完整 http(s):// 或以 / 开头的相对路径。空=不回调。</summary>
+        protected string _beforeCallback;
+        /// <summary>更新成功后回调地址（上负载）。空=不回调。</summary>
+        protected string _afterCallback;
+        /// <summary>更新前回调后等待秒数，让在途请求处理完成再停站更新。0=不等待。</summary>
+        protected int _drainWaitSeconds;
+        /// <summary>回调 HTTP 超时秒数，默认 10。</summary>
+        protected int _callbackTimeout = 10;
+        /// <summary>两阶段标记：空=原子发布（现行为）；upload=仅存包解压；deploy=仅执行部署。</summary>
+        protected string _deployPhase;
+
+        /// <summary>
+        /// 相对路径回调时用于组装本机地址(http://127.0.0.1:{port}{path})的站点端口。
+        /// 由子类覆盖提供（如 IIS 站点绑定端口）；默认空表示无法解析相对路径回调。
+        /// </summary>
+        protected virtual string CallbackPortForRelative => null;
+
+        /// <summary>
+        /// 两阶段发布的“上传阶段”：仅存包+解压到版本目录，不动站点。
+        /// 默认回退为原子行为（直接调 DeployExcutor）；支持两阶段的子类（如 IIsPublisher）覆盖为“仅存包解压”。
+        /// </summary>
+        protected virtual string PrepareUpload(FormHandler.FormItem fileItem) => DeployExcutor(fileItem);
         public string Deploy(FormHandler.FormItem fileItem)
         {
             //按照项目名称 不能并发发布
@@ -104,7 +129,37 @@ namespace AntDeployAgent.MyApp.Service
 
         private string ExcuteDeploy(FormHandler.FormItem fileItem)
         {
+            // ===== 两阶段：上传阶段仅存包+解压，不触发回调、不动站点、不做版本收尾 =====
+            if (string.Equals(_deployPhase, "upload", StringComparison.OrdinalIgnoreCase))
+            {
+                Log("【twophase】phase=upload：仅上传并解压发布包，暂不部署");
+                return PrepareUpload(fileItem);
+            }
+
+            if (string.Equals(_deployPhase, "deploy", StringComparison.OrdinalIgnoreCase))
+            {
+                Log("【twophase】phase=deploy：执行部署（发布包已在上传阶段就位）");
+            }
+
+            // ===== 更新前回调（下负载）+ 等待在途请求处理完成 =====
+            if (!string.IsNullOrEmpty(_beforeCallback))
+            {
+                CallbackHelper.Invoke(_beforeCallback, CallbackPortForRelative, _callbackTimeout, Log);
+            }
+            if (_drainWaitSeconds > 0)
+            {
+                Log($"【callback】等待 {_drainWaitSeconds} 秒，让在途请求处理完成后再更新站点");
+                Thread.Sleep(_drainWaitSeconds * 1000);
+            }
+
             var re = DeployExcutor(fileItem);
+
+            // ===== 部署成功后回调（上负载）=====
+            if (string.IsNullOrEmpty(re) && !string.IsNullOrEmpty(_afterCallback))
+            {
+                CallbackHelper.Invoke(_afterCallback, CallbackPortForRelative, _callbackTimeout, Log);
+            }
+
             try
             {
                 if (_formHandler == null)
@@ -183,7 +238,27 @@ namespace AntDeployAgent.MyApp.Service
                 }
             }
 
+            // ===== 解析发布回调（下负载/上负载）与两阶段字段（公共，对所有发布类型生效；缺省即原行为）=====
+            _beforeCallback = GetFormText(formHandler, "beforeCallback");
+            _afterCallback = GetFormText(formHandler, "afterCallback");
+            _drainWaitSeconds = GetFormInt(formHandler, "drainWait", 0);
+            _callbackTimeout = GetFormInt(formHandler, "callbackTimeout", 10);
+            _deployPhase = GetFormText(formHandler, "deployPhase");
+
             return CheckData(formHandler);
+        }
+
+        private static string GetFormText(FormHandler formHandler, string fieldName)
+        {
+            var item = formHandler.FormItems.FirstOrDefault(r => r.FieldName.Equals(fieldName));
+            return item != null && !string.IsNullOrEmpty(item.TextValue) ? item.TextValue.Trim() : null;
+        }
+
+        private static int GetFormInt(FormHandler formHandler, string fieldName, int defaultValue)
+        {
+            var txt = GetFormText(formHandler, fieldName);
+            if (string.IsNullOrEmpty(txt)) return defaultValue;
+            return int.TryParse(txt, out var v) ? v : defaultValue;
         }
 
         protected string findUploadFolder(string _projectPublishFolder, bool isPublish = false, bool docker = false)

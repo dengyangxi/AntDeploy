@@ -1,0 +1,255 @@
+@using AntDeploy.Core.Models
+
+<Divider>@Title</Divider>
+<div class="form-grid">
+    @if (Type == "iis")
+    {
+        <div class="form-item">
+            <div class="form-label">网站名称 WebSiteName <span style="color:#cf1322;">*</span></div>
+            <Input @bind-Value="Profile.Iis.WebSiteName" Placeholder="IIS 发布必填" />
+            <div class="form-hint" style="color:#cf1322;">发布前必填：IIS 站点名称，缺失将导致发布失败。</div>
+        </div>
+        <div class="form-item">
+            <div class="form-label">应用程序池 PoolName</div>
+            <Input @bind-Value="Profile.Iis.PoolName" />
+        </div>
+        <div class="form-item">
+            <div class="form-label">物理路径 PhysicalPath</div>
+            <Input @bind-Value="Profile.Iis.PhysicalPath" />
+        </div>
+        <div class="form-item">
+            <div class="form-label">项目类型 SdkType</div>
+            <Input @bind-Value="Profile.Iis.SdkType" Placeholder="netcore / framework" />
+        </div>
+        <div class="form-item">
+            <div class="form-label">站点端口 Port（校验/预热用，可选）</div>
+            <Input @bind-Value="Profile.Iis.Port" Placeholder="如 8080" />
+        </div>
+        <div class="form-item">
+            <div class="form-label">高级选项</div>
+            <div style="display:flex;flex-direction:column;gap:6px;">
+                <span style="display:inline-flex;align-items:center;gap:6px;">
+                    <Checkbox @bind-Checked="Profile.Iis.PoolAlwaysRunning">应用程序池常驻 PoolAlwaysRunning</Checkbox>
+                    <Tooltip>
+                        <TitleTemplate>应用池保持常驻（AlwaysRunning），减少首次请求的冷启动延迟；适合对首请求响应时间敏感的站点。</TitleTemplate>
+                        <ChildContent>
+                            <span style="display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;background:#bfbfbf;color:#fff;font-size:11px;cursor:help;">?</span>
+                        </ChildContent>
+                    </Tooltip>
+                </span>
+                <span style="display:inline-flex;align-items:center;gap:6px;">
+                    <Checkbox @bind-Checked="Profile.Iis.UseOfflineHtm">部署时显示离线页 UseOfflineHtm</Checkbox>
+                    <Tooltip>
+                        <TitleTemplate>部署期间放置 app_offline.htm，让 IIS 主动释放文件占用并向访问者显示离线页；适合既想避免文件锁、又想给用户友好提示的场景。</TitleTemplate>
+                        <ChildContent>
+                            <span style="display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;background:#bfbfbf;color:#fff;font-size:11px;cursor:help;">?</span>
+                        </ChildContent>
+                    </Tooltip>
+                </span>
+                <span style="display:inline-flex;align-items:center;gap:6px;">
+                    <Checkbox @bind-Checked="Profile.Iis.NotStopSiteDeploy">不停站部署 NotStopSiteDeploy</Checkbox>
+                    <Tooltip>
+                        <TitleTemplate>不停站点直接覆盖文件，速度最快，但可能因文件被占用导致替换失败；仅适合小改动或确定无文件锁的场景。</TitleTemplate>
+                        <ChildContent>
+                            <span style="display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;background:#bfbfbf;color:#fff;font-size:11px;cursor:help;">?</span>
+                        </ChildContent>
+                    </Tooltip>
+                </span>
+                <span style="display:inline-flex;align-items:center;gap:6px;">
+                    <Checkbox @bind-Checked="Profile.Iis.UseTempPhysicalPath">使用临时物理路径 UseTempPhysicalPath</Checkbox>
+                    <Tooltip>
+                        <TitleTemplate>先发布到临时目录，再切换站点物理路径并回收应用池，彻底规避文件占用（推荐用于零锁发布）。</TitleTemplate>
+                        <ChildContent>
+                            <span style="display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;background:#bfbfbf;color:#fff;font-size:11px;cursor:help;">?</span>
+                        </ChildContent>
+                    </Tooltip>
+                </span>
+                <span style="display:inline-flex;align-items:center;gap:6px;">
+                    <Checkbox @bind-Checked="Profile.Iis.EnableIncrement">增量部署（仅上传变更文件）</Checkbox>
+                    <Tooltip>
+                        <TitleTemplate>仅上传相对上次发布有变更的文件，减小上传体积、加快发布；首次发布或基线缺失时会退化为全量。</TitleTemplate>
+                        <ChildContent>
+                            <span style="display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;background:#bfbfbf;color:#fff;font-size:11px;cursor:help;">?</span>
+                        </ChildContent>
+                    </Tooltip>
+                </span>
+                <span style="display:inline-flex;align-items:center;gap:6px;">
+                    <Checkbox @bind-Checked="Profile.Iis.EnableSelectDeploy">选择文件部署</Checkbox>
+                    <Tooltip>
+                        <TitleTemplate>手动勾选要部署的文件，仅上传选中项；适合只更新个别文件的场景。</TitleTemplate>
+                        <ChildContent>
+                            <span style="display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;background:#bfbfbf;color:#fff;font-size:11px;cursor:help;">?</span>
+                        </ChildContent>
+                    </Tooltip>
+                </span>
+            </div>
+            <div class="form-hint" style="margin-top:6px;">关于文件被占用：Agent 默认已回收/停止应用池并等待数秒；若仍担心替换失败，请勾选 UseTempPhysicalPath（零锁，推荐）或 UseOfflineHtm。此为 IIS 专属问题，Docker / Linux / Windows 服务无此顾虑。</div>
+        </div>
+    }
+    else if (Type == "windowservice")
+    {
+        <div class="form-item">
+            <div class="form-label">服务名称 ServiceName</div>
+            <Input @bind-Value="Profile.WindowsService.ServiceName" />
+        </div>
+        <div class="form-item">
+            <div class="form-label">项目类型 SdkType</div>
+            <Input @bind-Value="Profile.WindowsService.SdkType" Placeholder="netcore / framework" />
+        </div>
+        <div class="form-item">
+            <div class="form-label">启动脚本 StartBat（可选）</div>
+            <Input @bind-Value="Profile.WindowsService.StartBat" />
+        </div>
+        <div class="form-item">
+            <div class="form-label">可执行文件相对路径 ExecFilePath</div>
+            <Input @bind-Value="Profile.WindowsService.ExecFilePath" Placeholder="项目自安装服务时用" />
+        </div>
+        <div class="form-item">
+            <div class="form-label">启动类型 StartType</div>
+            <Input @bind-Value="Profile.WindowsService.StartType" Placeholder="Automatic / Manual" />
+        </div>
+        <div class="form-item">
+            <div class="form-label">服务描述 Description</div>
+            <Input @bind-Value="Profile.WindowsService.Description" />
+        </div>
+        <div class="form-item">
+            <div class="form-label">启动参数 Param</div>
+            <Input @bind-Value="Profile.WindowsService.Param" />
+        </div>
+        <div class="form-item">
+            <div class="form-label">选项</div>
+            <div style="display:flex;flex-direction:column;gap:4px;">
+                <Checkbox @bind-Checked="Profile.WindowsService.IsProjectInstallService">由项目自身安装服务</Checkbox>
+                <Checkbox @bind-Checked="Profile.WindowsService.EnableIncrement">增量部署</Checkbox>
+                <Checkbox @bind-Checked="Profile.WindowsService.EnableSelectDeploy">选择文件部署</Checkbox>
+            </div>
+            <div class="form-label" style="margin-top:6px;">使用 nssm 安装 UseNssm</div>
+            <Input @bind-Value="Profile.WindowsService.UseNssm" Placeholder="yes / 留空" />
+        </div>
+    }
+    else if (Type == "linux")
+    {
+        <div class="form-item">
+            <div class="form-label">服务名称 ServiceName</div>
+            <Input @bind-Value="Profile.Linux.ServiceName" />
+        </div>
+        <div class="form-item">
+            <div class="form-label">环境参数 EnvParam（如 --environment=prod）</div>
+            <Input @bind-Value="Profile.Linux.EnvParam" />
+        </div>
+        <div class="form-item">
+            <div class="form-label">项目类型 SdkType</div>
+            <Input @bind-Value="Profile.Linux.SdkType" Placeholder="netcore" />
+        </div>
+        <div class="form-item">
+            <div class="form-label">选项</div>
+            <div style="display:flex;flex-direction:column;gap:4px;">
+                <Checkbox @bind-Checked="Profile.Linux.UseDotnet">使用 dotnet 启动（dotnet xxx.dll）</Checkbox>
+                <Checkbox @bind-Checked="Profile.Linux.NotifySystemd">部署后通知 systemd 重启</Checkbox>
+                <Checkbox @bind-Checked="Profile.Linux.EnableIncrement">增量部署</Checkbox>
+                <Checkbox @bind-Checked="Profile.Linux.EnableSelectDeploy">选择文件部署</Checkbox>
+            </div>
+        </div>
+    }
+    else if (Type == "docker")
+    {
+        <div class="form-item">
+            <div class="form-label">目标镜像 TargetImage</div>
+            <Input @bind-Value="Profile.Docker.TargetImage" />
+        </div>
+        <div class="form-item">
+            <div class="form-label">基础镜像 BaseImage</div>
+            <Input @bind-Value="Profile.Docker.BaseImage" />
+        </div>
+        <div class="form-item">
+            <div class="form-label">端口映射 Port（如 8080:80）</div>
+            <Input @bind-Value="Profile.Docker.Port" />
+        </div>
+        <div class="form-item">
+            <div class="form-label">挂载卷 Volume</div>
+            <Input @bind-Value="Profile.Docker.Volume" />
+        </div>
+        <div class="form-item">
+            <div class="form-label">其他参数 Other</div>
+            <Input @bind-Value="Profile.Docker.Other" />
+        </div>
+        <div class="form-item">
+            <div class="form-label">容器环境变量 ASPNETCORE_ENVIRONMENT</div>
+            <Input @bind-Value="Profile.Docker.AspNetCoreEnv" Placeholder="Production / Development" />
+        </div>
+        <div class="form-item">
+            <div class="form-label">远程工作目录 WorkDir（留空则 antdeploy）</div>
+            <Input @bind-Value="Profile.Docker.WorkDir" />
+        </div>
+        <div class="form-item">
+            <div class="form-label">删除 N 天前旧版本（0 不删除）</div>
+            <AntDesign.InputNumber @bind-Value="Profile.Docker.RemoveDaysFromPublished" Min="0" Style="width:160px;" />
+        </div>
+        <div class="form-item">
+            <div class="form-label">部署选项</div>
+            <div style="display:flex;flex-direction:column;gap:4px;">
+                <Checkbox @bind-Checked="Profile.Docker.EnableSudo">使用 sudo 执行 docker</Checkbox>
+                <Checkbox @bind-Checked="Profile.Docker.BuildImageOnly">仅构建镜像不启动容器</Checkbox>
+                <Checkbox @bind-Checked="Profile.Docker.EnableIncrement">增量部署</Checkbox>
+                <Checkbox @bind-Checked="Profile.Docker.EnableSelectDeploy">选择文件部署</Checkbox>
+                <Checkbox @bind-Checked="Profile.Docker.EnableUpload">构建后推送镜像仓库</Checkbox>
+            </div>
+        </div>
+
+        <div class="form-item" style="grid-column:1 / -1;">
+            <div class="form-label">镜像仓库（EnableUpload 时生效）</div>
+            <div class="form-grid">
+                <div class="form-item"><div class="form-label">仓库地址 RepositoryUrl</div><Input @bind-Value="Profile.Docker.RepositoryUrl" /></div>
+                <div class="form-item"><div class="form-label">命名空间 NameSpace</div><Input @bind-Value="Profile.Docker.RepositoryNameSpace" /></div>
+                <div class="form-item"><div class="form-label">镜像名 ImageName</div><Input @bind-Value="Profile.Docker.RepositoryImageName" /></div>
+                <div class="form-item"><div class="form-label">仓库账号</div><Input @bind-Value="Profile.Docker.RepositoryUserName" /></div>
+                <div class="form-item"><div class="form-label">仓库密码</div><InputPassword @bind-Value="Profile.Docker.RepositoryUserPwd" /></div>
+            </div>
+        </div>
+
+        <div class="form-item" style="grid-column:1 / -1;">
+            <div class="form-label">jib 镜像构建（“构建镜像”按钮使用）</div>
+            <div class="form-grid">
+                <div class="form-item"><div class="form-label">目标 Tags（逗号分隔）</div><Input @bind-Value="Profile.Docker.TargetTags" Placeholder="latest,v1" /></div>
+                <div class="form-item"><div class="form-label">Entrypoint（逗号分隔）</div><Input @bind-Value="Profile.Docker.Entrypoint" Placeholder="dotnet,app.dll" /></div>
+                <div class="form-item"><div class="form-label">Cmd（逗号分隔）</div><Input @bind-Value="Profile.Docker.Cmd" /></div>
+                <div class="form-item"><div class="form-label">镜像格式 ImageFormat</div><Input @bind-Value="Profile.Docker.ImageFormat" Placeholder="docker" /></div>
+                <div class="form-item"><div class="form-label">Base 代理 BaseHttpProxy</div><Input @bind-Value="Profile.Docker.BaseHttpProxy" /></div>
+                <div class="form-item"><div class="form-label">Target 代理 TargetHttpProxy</div><Input @bind-Value="Profile.Docker.TargetHttpProxy" /></div>
+                <div class="form-item"><div class="form-label">基础镜像账号</div><Input @bind-Value="Profile.Docker.BaseImageCredential.UserName" /></div>
+                <div class="form-item"><div class="form-label">基础镜像密码</div><InputPassword @bind-Value="Profile.Docker.BaseImageCredential.Password" /></div>
+                <div class="form-item"><div class="form-label">目标镜像账号</div><Input @bind-Value="Profile.Docker.TargetImageCredential.UserName" /></div>
+                <div class="form-item"><div class="form-label">目标镜像密码</div><InputPassword @bind-Value="Profile.Docker.TargetImageCredential.Password" /></div>
+            </div>
+        </div>
+
+        <div class="form-item" style="grid-column:1 / -1;">
+            <div class="form-label">镜像忽略列表（构建镜像时跳过）</div>
+            <ListEditor Value="Profile.Docker.IgnoreList" Placeholder="如 *.pdb" AddText="添加忽略项" />
+        </div>
+    }
+</div>
+
+<Divider>按环境配置对（EnvPair）</Divider>
+<EnvPairEditor Value="@Pairs" Type="@Type" />
+
+@code {
+    [Parameter, EditorRequired] public DeployProfile Profile { get; set; } = default!;
+    [Parameter] public string Type { get; set; } = "iis";
+
+    private string Title => Type switch
+    {
+        "windowservice" => "Windows 服务配置",
+        "linux" => "Linux 服务配置",
+        "docker" => "Docker 配置",
+        _ => "IIS 配置"
+    };
+
+    private List<EnvPairConfig> Pairs => Type switch
+    {
+        "windowservice" => Profile.WindowsService.EnvPairList,
+        "linux" => Profile.Linux.EnvPairList,
+        "docker" => Profile.Docker.EnvPairList,
+        _ => Profile.Iis.EnvPairList
+    };
+}

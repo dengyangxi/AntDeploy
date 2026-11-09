@@ -1,0 +1,15 @@
+@inject NavigationManager Nav
+
+@code {
+    private bool _navigated;
+
+    protected override void OnAfterRender(bool firstRender)
+    {
+        if (firstRender && !_navigated)
+        {
+            _navigated = true;
+            // 未授权访问受保护页面时，整页跳转到登录页（在渲染后跳转，避免预渲染期调用导航异常）
+            Nav.NavigateTo("/login", forceLoad: true);
+        }
+    }
+}

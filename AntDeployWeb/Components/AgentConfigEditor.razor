@@ -1,0 +1,276 @@
+@*
+    Agent 配置编辑器（W1.10）：改 Agent 内置运行配置 → 保存（AES 加密入库）；
+    “保存并同步”再对每台在线服务器经 /config 端点推送（Agent 本机原子写 agentsettings.json + 热加载即时生效，Port 变更提示需重启）。
+    同步前 /version 探测能力：低版本 / 不可达的服务器跳过并列出原因。Token 以 password 输入回显脱敏。
+    日志经后台线程回调追加，锁内改集合 + InvokeAsync 节流渲染（遵循 Blazor Server 线程安全约定）。
+*@
+@using Newtonsoft.Json
+@inject AgentConfigSyncer Syncer
+@inject AgentService AgentStore
+@inject CurrentUserService CurrentUser
+@inject MessageService Message
+
+<Modal Title="@("编辑配置 - " + (_model?.Name ?? string.Empty))"
+       Visible="@Visible"
+       OnCancel="@(() => CloseAsync())"
+       Footer="null"
+       Width="880"
+       MaskClosable="false">
+    @if (_model != null && _config != null)
+    {
+        <div class="wizard-body">
+            <div class="wizard-sec">
+                <div class="wizard-sec__title"><Icon Type="setting" />Agent 运行配置</div>
+                <div class="wizard-grid">
+                    <div class="wizard-field wizard-field--full">
+                        <span class="wizard-field__label">授权 Token *</span>
+                        <input class="wizard-input" type="password" @bind="_config.Token" placeholder="与目标机 agentsettings.json 一致" />
+                        <span class="wizard-note">用于发布与在线同步鉴权；两端须完全一致，否则 /config 返回 Token 无效。</span>
+                    </div>
+                    <div class="wizard-field">
+                        <span class="wizard-field__label">Agent 通讯端口 (HTTP)</span>
+                        <input class="wizard-input" type="number" @bind="_config.Port" />
+                    </div>
+                    <div class="wizard-field">
+                        <span class="wizard-field__label">发布根目录 DeployDir（空 = 程序目录）</span>
+                        <input class="wizard-input" @bind="_config.DeployDir" />
+                    </div>
+                    <div class="wizard-field">
+                        <span class="wizard-field__label">Mac 白名单（逗号分隔，空 = 不限）</span>
+                        <input class="wizard-input" @bind="_config.MacWhiteList" />
+                    </div>
+                    <div class="wizard-field">
+                        <span class="wizard-field__label">备份保留个数（0 = 同发布历史）</span>
+                        <input class="wizard-input" type="number" @bind="_config.BackUpLimit" />
+                    </div>
+                    <div class="wizard-field">
+                        <span class="wizard-field__label">发布历史保留个数</span>
+                        <input class="wizard-input" type="number" @bind="_config.OldPublishLimit" />
+                    </div>
+                    <div class="wizard-field">
+                        <span class="wizard-field__label">清理超过 N 天的旧发布（0 = 不清理）</span>
+                        <input class="wizard-input" type="number" @bind="_config.ClearOldPublishFolderOverDays" />
+                    </div>
+                    <div class="wizard-field">
+                        <span class="wizard-field__label">启用备份</span>
+                        <label style="display:flex;align-items:center;gap:6px;height:32px;font-size:13px;">
+                            <input type="checkbox" @bind="_config.NeedBackUp" /> NeedBackUp
+                        </label>
+                    </div>
+                </div>
+                <div class="wizard-note">Token / 白名单 / 备份等改后热生效；「Agent 通讯端口」变更需重启 Agent 服务才会重新监听。</div>
+            </div>
+
+            <div class="wizard-sec">
+                <div class="wizard-sec__title"><Icon Type="cloud-server" />将同步到以下 @(_model.ServerCount) 台服务器</div>
+                <div style="max-height:120px;overflow-y:auto;border:1px solid #eee;border-radius:6px;padding:8px 10px;">
+                    @foreach (var s in _model.Servers)
+                    {
+                        <div style="font-size:12px;padding:2px 0;">· @s.Host <span class="wizard-note">（@(s.IsWinRm ? "WinRM" : "SSH") · 安装目录 @s.EffectiveInstallDir(_model.OsType)）</span></div>
+                    }
+                </div>
+            </div>
+
+            @if (_syncStarted)
+            {
+                <div class="wizard-sec">
+                    <div class="wizard-sec__title"><Icon Type="sync" />在线同步结果</div>
+                    <DeployLogConsole Lines="LogSnapshot"
+                                      Live="_running"
+                                      Header="同步日志 · SYNC LOG"
+                                      SubHeader="@(_running ? "同步中…" : "已完成")"
+                                      Height="260px" />
+                    @if (_results.Count > 0)
+                    {
+                        <div style="margin-top:12px;">
+                            @foreach (var r in _results)
+                            {
+                                <div class="result-row @(r.Success ? "result-row--ok" : "result-row--fail")">
+                                    <span class="result-row__icon">@(r.Success ? "✓" : "✗")</span>
+                                    <span><span class="result-row__host">@r.Host</span><span class="result-row__msg">@r.Msg</span></span>
+                                </div>
+                            }
+                        </div>
+                    }
+                </div>
+            }
+        </div>
+
+        <div class="wizard-footer">
+            @if (_running)
+            {
+                <Button Danger="true" OnClick="CancelSync">取消同步</Button>
+            }
+            else
+            {
+                <Button OnClick="@(() => CloseAsync())">关闭</Button>
+                <Button OnClick="SaveOnlyAsync">仅保存</Button>
+                <Button Type="ButtonType.Primary" OnClick="SaveAndSyncAsync">保存并同步到在线 Agent</Button>
+            }
+        </div>
+    }
+</Modal>
+
+@code {
+    [Parameter] public bool Visible { get; set; }
+    [Parameter] public EventCallback<bool> VisibleChanged { get; set; }
+    /// <summary>要编辑的 Agent 客户端（内部克隆其 Config，不直接改动传入对象）。</summary>
+    [Parameter] public AgentClient? Model { get; set; }
+    /// <summary>保存后回调（父页刷新列表）。</summary>
+    [Parameter] public EventCallback OnSaved { get; set; }
+
+    private bool _lastVisible;
+    private AgentClient? _model;
+    private AgentConfigDto? _config;
+
+    private bool _running;
+    private bool _syncStarted;
+    private List<HostResult> _results = new();
+    private CancellationTokenSource? _cts;
+    private readonly List<LogEntry> _logs = new();
+    private readonly object _logLock = new();
+    private int _renderQueued;
+
+    protected override void OnParametersSet()
+    {
+        if (Visible && !_lastVisible) Reset();
+        _lastVisible = Visible;
+    }
+
+    private void Reset()
+    {
+        _model = Model;
+        _config = Clone(Model?.Config) ?? new AgentConfigDto();
+        _running = false;
+        _syncStarted = false;
+        _results = new List<HostResult>();
+        lock (_logLock) _logs.Clear();
+        try { _cts?.Dispose(); } catch { }
+        _cts = null;
+    }
+
+    private static T? Clone<T>(T? src) where T : class =>
+        src == null ? null : JsonConvert.DeserializeObject<T>(JsonConvert.SerializeObject(src));
+
+    private bool Validate(out string err)
+    {
+        if (_config == null) { err = "配置为空"; return false; }
+        if (string.IsNullOrWhiteSpace(_config.Token)) { err = "请填写 Agent 授权 Token"; return false; }
+        if (_config.Port <= 0 || _config.Port > 65535) { err = "Agent 通讯端口需在 1 - 65535 之间"; return false; }
+        err = string.Empty;
+        return true;
+    }
+
+    /// <summary>克隆当前 model 并套用编辑后的配置（凭据仍为内存明文，由 AgentService.Save 落库前统一 AES 加密）。</summary>
+    private AgentClient BuildSave()
+    {
+        var c = Clone(_model) ?? new AgentClient();
+        c.Config = Clone(_config) ?? new AgentConfigDto();
+        return c;
+    }
+
+    private async Task SaveOnlyAsync()
+    {
+        if (_model == null) { Message.Warning("未选择 Agent 客户端"); return; }
+        if (!Validate(out var e)) { Message.Warning(e); return; }
+        if (!CurrentUser.CanEditAgent(_model)) { Message.Warning("无权编辑该 Agent 客户端"); return; }
+        AgentStore.Save(BuildSave());
+        await OnSaved.InvokeAsync();
+        Message.Success("配置已保存（凭据加密入库）");
+        await CloseAsync();
+    }
+
+    private async Task SaveAndSyncAsync()
+    {
+        if (_running) return;
+        if (_model == null) { Message.Warning("未选择 Agent 客户端"); return; }
+        if (!Validate(out var e)) { Message.Warning(e); return; }
+        if (!CurrentUser.CanEditAgent(_model)) { Message.Warning("无权编辑该 Agent 客户端"); return; }
+
+        var toSave = BuildSave();
+        AgentStore.Save(toSave);          // 先加密落库
+        await OnSaved.InvokeAsync();      // 刷新列表
+
+        _syncStarted = true;
+        _running = true;
+        _results = new List<HostResult>();
+        lock (_logLock) _logs.Clear();
+        try { _cts?.Dispose(); } catch { }
+        _cts = new CancellationTokenSource();
+        StateHasChanged();
+
+        try
+        {
+            AppendLog("===== 配置已保存，开始同步到在线 Agent「" + toSave.Name + "」（" + toSave.ServerCount + " 台）=====");
+            _results = await Syncer.SyncAsync(toSave, AppendLog, _cts.Token);
+            var ok = _results.Count(r => r.Success);
+            var fail = _results.Count - ok;
+            AppendLog("===== 同步完成：" + ok + "/" + _results.Count + " 台成功 =====");
+            if (fail == 0) Message.Success("已同步到全部 " + ok + " 台在线 Agent");
+            else Message.Warning(ok + " 台同步成功，" + fail + " 台失败/跳过（详见下方原因）");
+        }
+        catch (OperationCanceledException)
+        {
+            AppendLog("[Warn] 同步已取消");
+        }
+        catch (Exception ex)
+        {
+            AppendLog("[Error] 同步异常：" + ex.Message);
+        }
+        finally
+        {
+            _running = false;
+            _ = InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private void CancelSync()
+    {
+        try { _cts?.Cancel(); } catch { }
+    }
+
+    private async Task CloseAsync()
+    {
+        try { _cts?.Cancel(); } catch { }
+        await VisibleChanged.InvokeAsync(false);
+    }
+
+    // ---------------- 实时日志（线程安全 + 节流渲染） ----------------
+
+    private void AppendLog(string? msg)
+    {
+        if (msg == null) return;
+        var entry = new LogEntry
+        {
+            Time = DateTime.Now.ToString("HH:mm:ss"),
+            Text = msg,
+            Css = ClassifyLog(msg)
+        };
+        lock (_logLock)
+        {
+            _logs.Add(entry);
+            if (_logs.Count > 2000) _logs.RemoveAt(0);
+        }
+        if (System.Threading.Interlocked.CompareExchange(ref _renderQueued, 1, 0) == 0)
+        {
+            _ = Task.Delay(150).ContinueWith(_ => InvokeAsync(() =>
+            {
+                System.Threading.Interlocked.Exchange(ref _renderQueued, 0);
+                StateHasChanged();
+            }));
+        }
+    }
+
+    private List<LogEntry> LogSnapshot
+    {
+        get { lock (_logLock) return _logs.ToList(); }
+    }
+
+    private static string ClassifyLog(string msg)
+    {
+        if (string.IsNullOrEmpty(msg)) return string.Empty;
+        if (msg.Contains("[Error]") || msg.Contains("✗") || msg.Contains("失败") || msg.Contains("Fail")) return "log-error";
+        if (msg.Contains("[Warn]") || msg.Contains("警告") || msg.Contains("跳过")) return "log-warn";
+        return string.Empty;
+    }
+}

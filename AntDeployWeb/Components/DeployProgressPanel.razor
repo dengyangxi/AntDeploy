@@ -1,0 +1,280 @@
+@*
+    发布进度面板：项目列表行内展示，显示总进度条 + 阶段管线 + 每台服务器 4 步骤卡片。
+    由 Projects.razor 传入 DeploySession，组件本身无状态（纯展示），线程安全由父组件节流渲染保证。
+*@
+
+<div class="dp-panel">
+    @if (Session != null)
+    {
+        @* ===== 总进度条 ===== *@
+        <div class="dp-overall">
+            <div class="dp-overall__bar">
+                <div class="dp-overall__fill @FillClass" style="width:@OverallPct%"></div>
+            </div>
+            <span class="dp-overall__pct">@OverallPct%</span>
+            <span class="dp-overall__phase">@PhaseLabel</span>
+        </div>
+
+        @* ===== 阶段管线 ===== *@
+        <div class="dp-pipeline">
+            @foreach (var step in PipelineSteps)
+            {
+                @if (step.Index > 0)
+                {
+                    <div class="dp-pipe-sep @(step.SepDone ? "dp-pipe-sep--done" : "")"></div>
+                }
+                <div class="dp-pipe-step @step.Css">
+                    <span class="dp-pipe-step__icon">@step.Icon</span>
+                    <span>@step.Label</span>
+                </div>
+            }
+        </div>
+
+        @* ===== 服务器卡片网格 ===== *@
+        @if (Servers.Count > 0)
+        {
+            <div class="dp-servers">
+                @foreach (var sp in Servers)
+                {
+                    <div class="dp-srv @SrvCardClass(sp)">
+                        <div class="dp-srv__head">
+                            <span class="dp-srv__name" title="@sp.Display">@sp.Display</span>
+                            <span class="dp-srv__badge @BadgeClass(sp)">@BadgeIcon(sp)</span>
+                        </div>
+                        <div class="dp-steps">
+                            @* 编译 *@
+                            <span class="dp-step @StepClass(sp.BuildStatus)">
+                                <span class="dp-step__icon">@StepIcon(sp.BuildStatus)</span>编译
+                            </span>
+                            @* 打包 *@
+                            <span class="dp-step @StepClass(sp.PackageStatus)">
+                                <span class="dp-step__icon">@StepIcon(sp.PackageStatus)</span>打包
+                            </span>
+                            @* 上传 *@
+                            <span class="dp-step @StepClass(sp.UploadStatus)">
+                                <span class="dp-step__icon">@StepIcon(sp.UploadStatus)</span>@UploadLabel(sp)
+                            </span>
+                            @* 部署 *@
+                            <span class="dp-step @StepClass(sp.DeployStatus)">
+                                <span class="dp-step__icon">@StepIcon(sp.DeployStatus)</span>部署
+                            </span>
+                        </div>
+                        <div class="dp-srv__status @StatusClass(sp)">@sp.StatusText</div>
+                    </div>
+                }
+            </div>
+        }
+
+        @* ===== 操作按钮 / 完成汇总 ===== *@
+        @if (Session.IsRunning)
+        {
+            <div class="dp-actions">
+                <Button Size="ButtonSize.Small" OnClick="OnOpenLog">实时日志</Button>
+                <Button Size="ButtonSize.Small" Danger="true" OnClick="OnCancel">停止</Button>
+            </div>
+        }
+        else
+        {
+            <div class="dp-actions">
+                <div class="dp-summary">
+                    @if (Session.IsSuccess)
+                    {
+                        <span class="dp-summary__tag dp-summary__tag--ok">✓ 发布成功</span>
+                    }
+                    else if (Session.IsPartial)
+                    {
+                        <span class="dp-summary__tag dp-summary__tag--partial">◐ 部分成功</span>
+                    }
+                    else if (Session.IsCancelled)
+                    {
+                        <span class="dp-summary__tag" style="background:var(--ink-050);color:var(--ink-500);">○ 已取消</span>
+                    }
+                    else
+                    {
+                        <span class="dp-summary__tag dp-summary__tag--fail">✗ 发布失败</span>
+                    }
+                    <span class="dp-summary__msg">@SummaryMsg</span>
+                </div>
+                <Button Size="ButtonSize.Small" OnClick="OnViewHistory">查看日志</Button>
+                <Button Size="ButtonSize.Small" OnClick="OnClear">清除</Button>
+            </div>
+        }
+    }
+</div>
+
+@code {
+    [Parameter] public DeploySession? Session { get; set; }
+    [Parameter] public EventCallback OnOpenLog { get; set; }
+    [Parameter] public EventCallback OnCancel { get; set; }
+    [Parameter] public EventCallback OnViewHistory { get; set; }
+    [Parameter] public EventCallback OnClear { get; set; }
+
+    /// <summary>线程安全快照：每台服务器进度。</summary>
+    private List<ServerProgress> Servers
+    {
+        get
+        {
+            if (Session == null) return new();
+            lock (Session.ProgressLock) return Session.ServerProgresses.ToList();
+        }
+    }
+
+    private int OverallPct => Session?.OverallPercent ?? 0;
+
+    private string FillClass => Session == null ? "" : Session.IsRunning ? ""
+        : Session.IsSuccess ? "dp-overall__fill--done"
+        : Session.IsFailed || Session.IsPartial ? "dp-overall__fill--fail" : "";
+
+    private string PhaseLabel
+    {
+        get
+        {
+            if (Session == null) return "";
+            if (!Session.IsRunning) return Session.StatusText;
+            return Session.Phase switch
+            {
+                "pull" => "拉取代码…",
+                "build" => "编译中…",
+                "package" => "打包中…",
+                "upload" => "上传中…",
+                "deploy" => "部署中…",
+                _ => Session.ProgressText
+            };
+        }
+    }
+
+    private string SummaryMsg
+    {
+        get
+        {
+            if (Session == null) return "";
+            if (Session.IsPartial)
+                return $"成功 {Session.SuccessCount} 台，失败 {Session.FailCount} 台";
+            if (Session.IsFailed)
+                return Session.Message + (string.IsNullOrEmpty(Session.LastError) ? "" : "：" + Session.LastError);
+            if (Session.IsSuccess)
+                return Session.Message;
+            return Session.Message;
+        }
+    }
+
+    // ===== 管线步骤 =====
+
+    private record PipeStep(int Index, string Label, string Icon, string Css, bool SepDone);
+
+    private List<PipeStep> PipelineSteps
+    {
+        get
+        {
+            if (Session == null) return new();
+            var phase = Session.Phase;
+            var running = Session.IsRunning;
+            var failed = Session.IsFailed;
+
+            var steps = new List<PipeStep>();
+            var phases = new[] { "pull", "build", "package", "upload" };
+            var labels = new[] { "拉取", "编译", "打包", "上传部署" };
+            var icons = new[] { "↓", "⚙", "📦", "🚀" };
+
+            var currentIdx = Array.IndexOf(phases, phase);
+            if (phase == "deploy") currentIdx = 3;
+            if (phase == "done") currentIdx = 4;
+            if (phase == "fail") currentIdx = -1; // 根据进度文本推断
+
+            for (var i = 0; i < 4; i++)
+            {
+                string css;
+                string icon;
+                if (!running && (Session.IsSuccess || Session.IsPartial))
+                {
+                    css = "dp-pipe-step--done"; icon = "✓";
+                }
+                else if (!running && failed)
+                {
+                    // 失败时：已完成的阶段标绿，失败阶段标红
+                    if (i < currentIdx) { css = "dp-pipe-step--done"; icon = "✓"; }
+                    else if (i == currentIdx) { css = "dp-pipe-step--fail"; icon = "✗"; }
+                    else { css = ""; icon = icons[i]; }
+                }
+                else if (i < currentIdx)
+                {
+                    css = "dp-pipe-step--done"; icon = "✓";
+                }
+                else if (i == currentIdx)
+                {
+                    css = running ? "dp-pipe-step--active" : "dp-pipe-step--done";
+                    icon = running ? icons[i] : "✓";
+                }
+                else
+                {
+                    css = ""; icon = icons[i];
+                }
+                steps.Add(new PipeStep(i, labels[i], icon, css, i < currentIdx || (!running && Session.IsSuccess)));
+            }
+            return steps;
+        }
+    }
+
+    // ===== 服务器卡片样式 =====
+
+    private static string SrvCardClass(ServerProgress sp)
+    {
+        if (sp.IsSuccess) return "dp-srv--ok";
+        if (sp.IsFailed) return "dp-srv--fail";
+        if (sp.UploadStatus == StepStatus.InProgress || sp.DeployStatus == StepStatus.InProgress
+            || sp.BuildStatus == StepStatus.InProgress || sp.PackageStatus == StepStatus.InProgress)
+            return "dp-srv--active";
+        return "";
+    }
+
+    private static string BadgeClass(ServerProgress sp)
+    {
+        if (sp.IsSuccess) return "dp-srv__badge--ok";
+        if (sp.IsFailed) return "dp-srv__badge--fail";
+        if (sp.UploadStatus == StepStatus.InProgress || sp.DeployStatus == StepStatus.InProgress
+            || sp.BuildStatus == StepStatus.InProgress || sp.PackageStatus == StepStatus.InProgress)
+            return "dp-srv__badge--run";
+        return "dp-srv__badge--wait";
+    }
+
+    private static string BadgeIcon(ServerProgress sp)
+    {
+        if (sp.IsSuccess) return "✓";
+        if (sp.IsFailed) return "✗";
+        if (sp.UploadStatus == StepStatus.InProgress || sp.DeployStatus == StepStatus.InProgress
+            || sp.BuildStatus == StepStatus.InProgress || sp.PackageStatus == StepStatus.InProgress)
+            return "●";
+        return "○";
+    }
+
+    private static string StepClass(StepStatus s) => s switch
+    {
+        StepStatus.Success => "dp-step--done",
+        StepStatus.Failed => "dp-step--fail",
+        StepStatus.InProgress => "dp-step--active",
+        _ => ""
+    };
+
+    private static string StepIcon(StepStatus s) => s switch
+    {
+        StepStatus.Success => "✓",
+        StepStatus.Failed => "✗",
+        StepStatus.InProgress => "▶",
+        _ => "○"
+    };
+
+    private static string UploadLabel(ServerProgress sp) =>
+        sp.UploadStatus == StepStatus.InProgress && sp.UploadPercent > 0 && sp.UploadPercent < 100
+            ? $"{sp.UploadPercent}%"
+            : "上传";
+
+    private static string StatusClass(ServerProgress sp)
+    {
+        if (sp.IsSuccess) return "dp-srv__status--ok";
+        if (sp.IsFailed) return "dp-srv__status--fail";
+        if (sp.UploadStatus == StepStatus.InProgress || sp.DeployStatus == StepStatus.InProgress
+            || sp.BuildStatus == StepStatus.InProgress || sp.PackageStatus == StepStatus.InProgress)
+            return "dp-srv__status--active";
+        return "";
+    }
+}
