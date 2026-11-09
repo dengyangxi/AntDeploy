@@ -42,7 +42,9 @@ namespace AntDeploy.Core.Util
                 // 必须先 /t:Build 再 /t:WebPublish：WebPublish 目标本身不编译项目，
                 // 旧写法用 /t:ResolveReferences /t:WebPublish 会跳过 CoreCompile，
                 // 导致 bin\{Assembly}.dll 从未产出，打包复制到 PackageTmp 时因源文件缺失报“句柄无效”(ERROR_INVALID_HANDLE)。
-                buildArg += " /t:Build /t:WebPublish /verbosity:minimal /p:BuildingProject=true /p:Configuration=Release /p:Platform=AnyCPU /p:WebPublishMethod=FileSystem /p:PublishProvider=FileSystem /p:DeleteExistingFiles=True /p:publishUrl=\"" + path2 + "\" /nr:false";
+                // DeleteExistingFiles=False：发布目录的清理由上面的 ClearPublishFolder 负责（它会保留增量基线 .git），
+                // 若置 True，WebPublish 会尝试删除“源里没有的” .git\objects\*，而 git 对象文件默认只读 → MSB3061 访问被拒绝、编译中断。
+                buildArg += " /t:Build /t:WebPublish /verbosity:minimal /p:BuildingProject=true /p:Configuration=Release /p:Platform=AnyCPU /p:WebPublishMethod=FileSystem /p:PublishProvider=FileSystem /p:DeleteExistingFiles=False /p:publishUrl=\"" + path2 + "\" /nr:false";
             }
             else
             {
@@ -245,18 +247,39 @@ namespace AntDeploy.Core.Util
             try { process?.Kill(); } catch { }
         }
 
+        /// <summary>
+        /// 清空发布目录（保留增量基线 .git）。因 WebPublish 的 DeleteExistingFiles 已置 False，
+        /// 这里是发布目录唯一的清理入口，须可靠删除：git 对象文件等默认带只读属性，
+        /// 直接 Delete 会抛“访问被拒绝”，故删除前先递归清除只读属性。
+        /// </summary>
         private static void ClearPublishFolder(string srcDir)
         {
             try
             {
                 var dir = new DirectoryInfo(srcDir);
                 if (!dir.Exists) return;
+                foreach (var file in dir.GetFiles()) ClearReadOnly(file);
                 foreach (var file in dir.GetFiles()) { try { file.Delete(); } catch { } }
                 foreach (var folder in dir.GetDirectories())
                 {
-                    if (folder.Name.EndsWith(".git")) continue;
-                    try { folder.Delete(true); } catch { }
+                    if (folder.Name.Equals(".git", StringComparison.OrdinalIgnoreCase)) continue; // 保留增量基线仓库
+                    try
+                    {
+                        foreach (var f in folder.GetFiles("*", SearchOption.AllDirectories)) ClearReadOnly(f);
+                        folder.Delete(true);
+                    }
+                    catch { }
                 }
+            }
+            catch { }
+        }
+
+        private static void ClearReadOnly(FileInfo file)
+        {
+            try
+            {
+                if ((file.Attributes & FileAttributes.ReadOnly) == FileAttributes.ReadOnly)
+                    file.Attributes = FileAttributes.Normal;
             }
             catch { }
         }
