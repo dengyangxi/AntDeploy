@@ -1,6 +1,4 @@
-﻿using AntDeployAgentWindows.WebApiCore;
-using AntDeployAgentWindows.WebSocketApp;
-using System;
+﻿using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
@@ -10,10 +8,12 @@ using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
-using AntDeployAgentWindows.Model;
 using Newtonsoft.Json;
+using AntDeployAgent.WebApiCore;
+using AntDeployAgent.WebSocketApp;
+using AntDeployAgent.Model;
 
-namespace AntDeployAgentWindows.MyApp.Service
+namespace AntDeployAgent.MyApp.Service
 {
     public abstract class PublishProviderBasicAPI : CommonProcessor, IPublishProviderAPI
     {
@@ -23,7 +23,7 @@ namespace AntDeployAgentWindows.MyApp.Service
         private static readonly ConcurrentDictionary<string, ReaderWriterLockSlim> locker = new ConcurrentDictionary<string, ReaderWriterLockSlim>();
         public abstract string ProviderName { get; }
         public string LoggerKey { get; set; }
-        public WebSocketApp.WebSocket WebSocket { get; set; }
+        public WebSocket WebSocket { get; set; }
         public abstract string ProjectName { get; }
         public abstract string ProjectPublishFolder { get; }
         public abstract string DeployExcutor(FormHandler.FormItem fileItem);
@@ -41,12 +41,13 @@ namespace AntDeployAgentWindows.MyApp.Service
                     locker.TryAdd(key, ReaderWriterLockSlim);
                 }
 
-                if (ReaderWriterLockSlim.IsWriteLockHeld)
+                // 关键修复：IsWriteLockHeld 是“线程级”判断，而每个请求运行在不同线程池线程上，
+                // 导致该判断永远为 false、同项目并发部署并未真正串行。改用 TryEnterWriteLock(0)
+                // 真正检测是否有其它线程正在部署，获取不到锁则直接返回“正在部署”，避免竞态
+                if (!ReaderWriterLockSlim.TryEnterWriteLock(0))
                 {
-                    return $"{ProjectName} is deploying!,please wait for senconds!";
+                    return $"{ProjectName} is deploying!,please wait for seconds!";
                 }
-
-                ReaderWriterLockSlim.EnterWriteLock();
 
                 try
                 {
@@ -66,6 +67,39 @@ namespace AntDeployAgentWindows.MyApp.Service
         public virtual string RollBack()
         {
             throw new NotImplementedException();
+        }
+
+        /// <summary>
+        /// 将上传文件写入目标路径。兼容两种来源：
+        /// 1) 内存模式（fileItem.FileBody 非空）——历史兼容路径；
+        /// 2) 流式模式（fileItem.FilePath 指向临时文件）——方案D，避免整包进内存。
+        /// 返回空字符串表示成功，否则返回错误信息。
+        /// </summary>
+        protected string SaveUploadFile(FormHandler.FormItem fileItem, string targetPath)
+        {
+            try
+            {
+                if (fileItem.FileBody != null && fileItem.FileBody.Length > 0)
+                {
+                    using (var fs = new FileStream(targetPath, FileMode.Create, FileAccess.Write))
+                    {
+                        fs.Write(fileItem.FileBody, 0, fileItem.FileBody.Length);
+                    }
+                    return string.Empty;
+                }
+
+                if (!string.IsNullOrEmpty(fileItem.FilePath) && File.Exists(fileItem.FilePath))
+                {
+                    File.Copy(fileItem.FilePath, targetPath, true);
+                    return string.Empty;
+                }
+
+                return "publish file is empty";
+            }
+            catch (Exception ex)
+            {
+                return "save publish file fail:" + ex.Message;
+            }
         }
 
         private string ExcuteDeploy(FormHandler.FormItem fileItem)
@@ -89,7 +123,7 @@ namespace AntDeployAgentWindows.MyApp.Service
                 }
 
                 //保存参数
-                var formArgs = _formHandler.FormItems.Where(r => r.FileBody == null || r.FileBody.Length < 1).ToList();
+                var formArgs = _formHandler.FormItems.Where(r => (r.FileBody == null || r.FileBody.Length < 1) && string.IsNullOrEmpty(r.FilePath)).ToList();
                 if (formArgs.Any())
                 {
                     var path = Path.Combine(ProjectPublishFolder, "antdeploy_args.json");

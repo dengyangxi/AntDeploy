@@ -5,13 +5,12 @@ using System.IO.Compression;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using AntDeployAgentWindows.Model;
-using AntDeployAgentWindows.MyApp.Service;
-using AntDeployAgentWindows.Operation;
 using AntDeployAgentWindows.Operation.OperationTypes;
-using AntDeployAgentWindows.Util;
-using AntDeployAgentWindows.WebApiCore;
 using System.Runtime.InteropServices;
+using AntDeployAgent.WebApiCore;
+using AntDeployAgent.Operation;
+using AntDeployAgent.Model;
+using AntDeployAgent.Util;
 namespace AntDeployAgent.MyApp.Service.Impl
 {
     public class LinuxPublisher : PublishProviderBasicAPI
@@ -43,10 +42,8 @@ namespace AntDeployAgent.MyApp.Service.Impl
             try
             {
                 var _zipFile = Path.Combine(_projectPublishFolder, fileItem.FileName);
-                using (var fs = new FileStream(_zipFile, FileMode.Create, FileAccess.Write))
-                {
-                    fs.Write(fileItem.FileBody, 0, fileItem.FileBody.Length);
-                }
+                var saveErr = SaveUploadFile(fileItem, _zipFile);
+                if (!string.IsNullOrEmpty(saveErr)) return saveErr;
 
 
                 if (!File.Exists(_zipFile))

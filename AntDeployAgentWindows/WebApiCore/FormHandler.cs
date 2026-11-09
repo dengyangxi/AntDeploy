@@ -14,6 +14,10 @@ namespace AntDeployAgentWindows.WebApiCore
    public class FormHandler
     {
 
+        /// <summary>
+        /// 上传过程中生成的临时文件（文件型表单项），部署完成后由 PublishService 调用 CleanupTempFiles 清理
+        /// </summary>
+        private readonly List<string> _tempFiles = new List<string>();
 
         /// <summary>
         /// 表单元素对象
@@ -31,9 +35,15 @@ namespace AntDeployAgentWindows.WebApiCore
             public string FileName;
 
             /// <summary>
-            /// 文件数据实体
+            /// 文件数据实体（仅历史兼容：当以小内存方式解析且保留在内存时使用；流式解析时为 null）
             /// </summary>
             public byte[] FileBody;
+
+            /// <summary>
+            /// 文件落盘的临时文件路径（方案D：流式写入临时文件，避免整包进内存）。
+            /// 当 FileBody 为 null 时，文件内容以该路径提供。
+            /// </summary>
+            public string FilePath;
 
             /// <summary>
             /// 文本内容
@@ -101,186 +111,169 @@ namespace AntDeployAgentWindows.WebApiCore
             if (!uint.TryParse(strLen, out uint sumsize)) throw new Exception("Content-Length Error");
             if (string.IsNullOrEmpty(context.Request.ContentType)) throw new Exception("Error:ContentType is NULL.");
 
-
-            //把数据读到缓冲区以备处理
-            var buffer = new MemoryStream();
-            var tmpbuffer = new byte[1024 * 64];
-            uint nextsize = sumsize; //sumsize:POST正文的总长度
-
-            //循环读取所有正文数据并写入内存流
-            while (nextsize > 0)
+            // 方案D：把请求体“流式”写入临时文件，避免把整个上传包缓冲到内存（降低 LOH 压力与 OOM 风险）
+            var bodyTempFile = Path.GetTempFileName();
+            try
             {
-                var len = context.Request.Body.Read(tmpbuffer, 0, tmpbuffer.Length);
-                if (len < 1) throw new Exception("Network Is Disconnect?");
-                nextsize -= (uint)len;
+                var tmpbuffer = new byte[1024 * 64];
+                uint nextsize = sumsize;
 
-                buffer.Write(tmpbuffer, 0, len);
-            }
+                // 关键修复（A）：读取加超时，避免客户端网络抖动导致连接假死时 Read 永久阻塞线程池线程
+                const int readTimeoutMilliseconds = 5 * 60 * 1000; // 5 分钟
+                using (var bodyFs = new FileStream(bodyTempFile, FileMode.Create, FileAccess.Write, FileShare.None, tmpbuffer.Length))
+                {
+                    while (nextsize > 0)
+                    {
+                        var toRead = (int)Math.Min(tmpbuffer.Length, nextsize);
+                        var readTask = context.Request.Body.ReadAsync(tmpbuffer, 0, toRead);
+                        if (!readTask.Wait(readTimeoutMilliseconds))
+                        {
+                            throw new Exception("Upload Read Timeout(>5min),connection maybe broken");
+                        }
 
-            //正文类型
-            var contentTypes = context.Request.ContentType.Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries);
+                        int len;
+                        try
+                        {
+                            len = readTask.Result;
+                        }
+                        catch (AggregateException ae)
+                        {
+                            throw new Exception("Upload Read Error:" + (ae.InnerException?.Message ?? ae.Message));
+                        }
 
+                        if (len < 1) throw new Exception("Network Is Disconnect?");
+                        nextsize -= (uint)len;
 
-            //处理多实体
-            /////////////////////////////
+                        bodyFs.Write(tmpbuffer, 0, len);
+                    }
+                }
 
-            if (contentTypes.Length > 1)
-            {
-                var ism = false;    //是否是多实体
-                var boundar = "";   //分隔线
+                // 正文类型
+                var contentTypes = context.Request.ContentType.Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries);
+
+                var isMultipart = false;
+                var boundar = "";
                 foreach (var s in contentTypes)
                 {
-                    //Content-Type:multipart/form-data; boundary=abcdef
                     var ss = s.Trim().ToLower();
-                    if (ss == "multipart/form-data") ism = true;
+                    if (ss == "multipart/form-data") isMultipart = true;
                     if (ss.StartsWith("boundary=")) boundar = "--" + s.Trim().Substring(9);
                 }
 
-                //如果是，处理
-                if (ism && boundar != "")
+                if (isMultipart && boundar != "")
                 {
-                    ParseMultipart(buffer.ToArray(), boundar);
-                    return;
+                    ParseMultipartFromFile(bodyTempFile, boundar);
+                }
+                else
+                {
+                    // 其它格式（x-www-form-urlencoded 等，体积很小）：直接从临时文件读全量解析
+                    ParseForm(File.ReadAllBytes(bodyTempFile), null);
                 }
             }
-
-            //处理其它格式（x-www-form-urlencoded）
-            /////////////////////////////
-            ParseForm(buffer.ToArray(), null);
-
+            catch
+            {
+                // 解析阶段异常：清理已生成的文件型临时文件，避免磁盘泄漏
+                foreach (var t in _tempFiles)
+                {
+                    try { File.Delete(t); } catch { /* ignore */ }
+                }
+                _tempFiles.Clear();
+                throw;
+            }
+            finally
+            {
+                // 请求体临时文件解析完毕后不再需要
+                try { File.Delete(bodyTempFile); } catch { /* ignore */ }
+            }
         }
 
 
         /// <summary>
-        /// 处理多实体表单
+        /// 部署完成后清理“文件型表单项”的临时文件（由 PublishService 调用）
         /// </summary>
-        /// <param name="body">数据</param>
-        /// <param name="boundar">分隔线</param>
-        private unsafe void ParseMultipart(byte[] body, string boundar)
+        public void CleanupTempFiles()
         {
-            var byttag = Encoding.ASCII.GetBytes(boundar);
-
-            //每个分隔线后正文起点位置
-            var poslist = new List<int>();
-
-
-            //找出每个元素的起点位置
-            fixed (byte* bp = body, tp = byttag)
+            foreach (var t in _tempFiles)
             {
-                var keyNum = *(long*)tp;
-                for (var i = 0; i < body.Length - byttag.Length; i++)
+                try { File.Delete(t); } catch { /* ignore */ }
+            }
+            _tempFiles.Clear();
+        }
+
+
+        /// <summary>
+        /// 处理多实体表单（流式：从临时文件按偏移截取每个 part，文件型 part 直接落盘到临时文件，不再整包进内存）
+        /// </summary>
+        /// <param name="bodyFile">请求体落盘的临时文件</param>
+        /// <param name="boundar">分隔线（已带前缀 "--"）</param>
+        private void ParseMultipartFromFile(string bodyFile, string boundar)
+        {
+            var delimiter = Encoding.ASCII.GetBytes(boundar);
+            var boundaryOffsets = FindBoundaryOffsets(bodyFile, delimiter);
+            if (boundaryOffsets.Count < 2) return;
+
+            using (var fs = new FileStream(bodyFile, FileMode.Open, FileAccess.Read, FileShare.Read, 1 << 16))
+            {
+                for (int i = 0; i < boundaryOffsets.Count - 1; i++)
                 {
-                    var lngnum = *(long*)(bp + i);
-                    if (lngnum == keyNum)
+                    long partStart = boundaryOffsets[i];
+                    long partEnd = boundaryOffsets[i + 1];
+
+                    long headerStart = partStart + delimiter.Length + 2; // 跳过 "--boundary" 及其后的 \r\n
+                    if (headerStart >= partEnd - 2) continue;
+
+                    long contentStart = FindDoubleCrlf(fs, headerStart, partEnd - 2);
+                    if (contentStart < 0) continue;
+                    contentStart += 4; // 跳过双回车
+
+                    long contentEnd = partEnd - 2; // 排除下一个 boundary 之前的 \r\n
+                    if (contentEnd <= contentStart) continue;
+
+                    int headerLen = (int)(contentStart - 4 - headerStart);
+                    if (headerLen < 0) continue;
+                    var headerBytes = ReadRange(fs, headerStart, headerLen);
+                    var headerText = Encoding.ASCII.GetString(headerBytes);
+
+                    string name = "", fileName = "";
+                    foreach (var s in headerText.Split(new[] { "\r\n" }, StringSplitOptions.RemoveEmptyEntries))
                     {
-                        var strTag = Encoding.ASCII.GetString(body, i, byttag.Length);
-                        if (strTag == boundar)
+                        var ss = s.Trim();
+                        if (ss.StartsWith("Content-Disposition:"))
                         {
-                            poslist.Add(i + byttag.Length + 2); //+2是跳过分隔线的回车
-                            i += byttag.Length;
+                            var disp = ss.Substring(20).Trim();
+                            foreach (var item in disp.Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries))
+                            {
+                                var itemx = item.Trim();
+                                if (itemx.StartsWith("name=")) name = itemx.Substring(5).Trim(new[] { '\x20', '\"' });
+                                if (itemx.StartsWith("filename=")) fileName = itemx.Substring(9).Trim(new[] { '\x20', '\"' });
+                            }
+                        }
+                    }
+
+                    if (name == "") continue;
+
+                    if (!string.IsNullOrEmpty(fileName))
+                    {
+                        // 文件型：把内容区流式拷贝到临时文件，仅保留路径，避免整包进内存
+                        string partTemp = Path.GetTempFileName();
+                        _tempFiles.Add(partTemp);
+                        using (var outFs = new FileStream(partTemp, FileMode.Create, FileAccess.Write, FileShare.None, 1 << 16))
+                        {
+                            CopyRange(fs, contentStart, contentEnd - contentStart, outFs);
                         }
 
-                        //结束标记
-                        if (body[i + 1] == '-' && body[i + 2] == '-' && body[i + 3] == 0x0D && body[i + 4] == 0x0A) break;
+                        _formDict[name] = new FormItem { FieldName = name, FileName = fileName, FilePath = partTemp };
                     }
-                }
-            }
-
-
-            //如果元素为0不再继续处理
-            if (poslist.Count < 2) return;
-
-            //处理每一个元素
-            for (var i = 0; i < poslist.Count - 1; i++)
-            {
-                var size = poslist[i + 1] - poslist[i] - byttag.Length - 4; //分隔线前后有回车符
-                if (size <= 0) continue;
-
-                var bytes = new byte[size];
-                Buffer.BlockCopy(body, poslist[i], bytes, 0, size);
-
-                ParseMulitPartItem(bytes);
-            }
-
-        }
-
-
-        /// <summary>
-        /// 处理一个MulitPart表单域
-        /// </summary>
-        /// <param name="body"></param>
-        private void ParseMulitPartItem(byte[] body)
-        {
-            if (body.Length < 10) return;
-
-            //每一节都是由一个“描述头+双回车+正文实体”组成
-
-            //找出双回车起始位置
-            var crlf2 = FindCrlf2(body);
-            if (crlf2 < 1 || crlf2 >= body.Length - 4) return;
-
-            //声明/说明部分（描述头）
-            var bytHead = new byte[crlf2];
-            Buffer.BlockCopy(body, 0, bytHead, 0, crlf2);
-
-            //正文部分
-            var bytBody = new byte[body.Length - crlf2 - 4];
-            Buffer.BlockCopy(body, crlf2 + 4, bytBody, 0, bytBody.Length);
-
-
-            //处理节点说明部分
-            var strHandle = Encoding.ASCII.GetString(bytHead); //utf8?
-            var strHandles = strHandle.Split(new[] { "\r\n" }, StringSplitOptions.RemoveEmptyEntries);
-
-            var name = "";
-            var fileName = "";
-            foreach (var s in strHandles)
-            {
-                var ss = s.Trim();
-
-                //解析 Content-Type
-                //if (ss.StartsWith("Content-Type:")) {
-                //    //Content-Type: text/plain; charset=UTF-8
-                //    //Content-Type: application/octet-stream
-                //    var ctyp = ss.Substring(13).Trim();
-                //    var ctypItems = ctyp.Split(';', StringSplitOptions.RemoveEmptyEntries);
-                //    foreach(){}
-                //}
-
-                //Content-Transfer-Encoding: binary
-                //正文编码方式
-
-                //关键看正文描述
-                if (ss.StartsWith("Content-Disposition:"))
-                {
-                    var disp = ss.Substring(20).Trim();
-                    var dispItems = disp.Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries);
-                    foreach (var item in dispItems)
+                    else
                     {
-                        var itemx = item.Trim();
-                        if (itemx.StartsWith("name=")) name = itemx.Substring(5).Trim(new[] { '\x20', '\"' });
-                        if (itemx.StartsWith("filename=")) fileName = itemx.Substring(9).Trim(new[] { '\x20', '\"' });
+                        // 普通文本表单项（体积小）
+                        long textLen = contentEnd - contentStart;
+                        var textBytes = ReadRange(fs, contentStart, (int)Math.Min(textLen, int.MaxValue));
+                        var txt = Encoding.UTF8.GetString(textBytes);
+                        _formDict[name] = new FormItem { FieldName = name, TextValue = txt };
                     }
                 }
             }
-
-            if (name == "") return;
-
-            if (!string.IsNullOrEmpty(fileName))
-            {
-                //文件名不为空，表示是文件
-                var v = new FormItem { FieldName = name, FileName = fileName, FileBody = bytBody };
-                _formDict.Add(name, v);
-            }
-            else
-            {
-                //没有文件名，肯定是普通表单
-                var txt = Encoding.UTF8.GetString(bytBody);
-                var v = new FormItem { FieldName = name, TextValue = txt };
-                _formDict.Add(name, v);
-            }
-            //Console.WriteLine("name:{0}, file:{1}", name, fileName);
-
         }
 
 
@@ -293,7 +286,7 @@ namespace AntDeployAgentWindows.WebApiCore
         {
             if (charset == null) charset = Encoding.UTF8;
 
-            //ContentType = "application/x-www-form-urlencoded;charset=utf8"; 
+            //ContentType = "application/x-www-form-urlencoded;charset=utf8";
             // name=value&name1=value1
 
             var src_string = Encoding.ASCII.GetString(body);
@@ -319,34 +312,139 @@ namespace AntDeployAgentWindows.WebApiCore
 
 
 
-        /// <summary>
-        /// 双回车
-        /// </summary>
-        private static readonly byte[] _byt_crlf2 = new byte[] { 0x0d, 0x0a, 0x0d, 0x0a };
+        #region 流式解析辅助方法
 
         /// <summary>
-        /// 查找第一个又回车
+        /// KMP：计算模式串的最长公共前后缀
         /// </summary>
-        /// <param name="byts"></param>
-        /// <returns></returns>
-        private static unsafe int FindCrlf2(byte[] byts)
+        private static int[] ComputeLps(byte[] pattern)
         {
-            if (byts.Length < 4) return -1;
-            fixed (byte* pcr = _byt_crlf2, bp = byts)
+            int m = pattern.Length;
+            var lps = new int[m];
+            int len = 0;
+            int i = 1;
+            while (i < m)
             {
-                var v1 = *(int*)pcr;
-                for (var i = 0; i < byts.Length - 3; i++)
+                if (pattern[i] == pattern[len])
                 {
-                    var v2 = *(int*)(bp + i);
-                    if (v1 == v2) return i;
+                    lps[i++] = ++len;
                 }
+                else if (len != 0)
+                {
+                    len = lps[len - 1];
+                }
+                else
+                {
+                    lps[i++] = 0;
+                }
+            }
+            return lps;
+        }
+
+        /// <summary>
+        /// 在文件中查找所有 boundary 出现的位置（流式扫描，内存占用恒定）
+        /// </summary>
+        private static List<long> FindBoundaryOffsets(string filePath, byte[] delimiter)
+        {
+            var offsets = new List<long>();
+            int dlen = delimiter.Length;
+            if (dlen == 0) return offsets;
+            var lps = ComputeLps(delimiter);
+            using (var fs = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.Read, 1 << 16))
+            {
+                var buf = new byte[1 << 16];
+                long absPos = 0;
+                int matched = 0;
+                int read;
+                while ((read = fs.Read(buf, 0, buf.Length)) > 0)
+                {
+                    for (int j = 0; j < read; j++)
+                    {
+                        while (matched > 0 && buf[j] != delimiter[matched])
+                            matched = lps[matched - 1];
+                        if (buf[j] == delimiter[matched]) matched++;
+                        if (matched == dlen)
+                        {
+                            offsets.Add(absPos + j - dlen + 1);
+                            matched = 0;
+                        }
+                    }
+                    absPos += read;
+                }
+            }
+            return offsets;
+        }
+
+        /// <summary>
+        /// 在 [start, endExclusive) 区间查找第一个 \r\n\r\n 的位置
+        /// </summary>
+        private static long FindDoubleCrlf(FileStream fs, long start, long endExclusive)
+        {
+            byte[] target = { 0x0D, 0x0A, 0x0D, 0x0A };
+            int state = 0;
+            var buf = new byte[1 << 12];
+            fs.Seek(start, SeekOrigin.Begin);
+            long pos = start;
+            while (pos < endExclusive)
+            {
+                int toRead = (int)Math.Min(buf.Length, endExclusive - pos);
+                int read = fs.Read(buf, 0, toRead);
+                if (read == 0) break;
+                for (int j = 0; j < read; j++)
+                {
+                    if (buf[j] == target[state])
+                    {
+                        state++;
+                        if (state == 4) return pos + j - 3;
+                    }
+                    else
+                    {
+                        state = (buf[j] == target[0]) ? 1 : 0;
+                    }
+                }
+                pos += read;
             }
             return -1;
         }
 
+        /// <summary>
+        /// 从文件指定偏移读取指定长度的内容（用于小体积的 header / 文本表单项）
+        /// </summary>
+        private static byte[] ReadRange(FileStream fs, long offset, int length)
+        {
+            if (length <= 0) return new byte[0];
+            var bytes = new byte[length];
+            fs.Seek(offset, SeekOrigin.Begin);
+            int total = 0;
+            while (total < length)
+            {
+                int r = fs.Read(bytes, total, length - total);
+                if (r == 0) break;
+                total += r;
+            }
+            if (total < length) Array.Resize(ref bytes, total);
+            return bytes;
+        }
 
+        /// <summary>
+        /// 将文件指定区间的内容流式拷贝到目标流（用于大体积文件型表单项，内存占用恒定）
+        /// </summary>
+        private static void CopyRange(FileStream srcFs, long offset, long length, Stream outFs)
+        {
+            if (length <= 0) return;
+            srcFs.Seek(offset, SeekOrigin.Begin);
+            var buf = new byte[1 << 16];
+            long remaining = length;
+            while (remaining > 0)
+            {
+                int toRead = (int)Math.Min(buf.Length, remaining);
+                int r = srcFs.Read(buf, 0, toRead);
+                if (r == 0) break;
+                outFs.Write(buf, 0, r);
+                remaining -= r;
+            }
+        }
 
-
-
+        #endregion
     }
 }

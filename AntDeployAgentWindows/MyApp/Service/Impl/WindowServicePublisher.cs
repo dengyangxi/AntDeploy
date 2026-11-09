@@ -37,10 +37,8 @@ namespace AntDeployAgentWindows.MyApp.Service.Impl
             {
 
                 var filePath = Path.Combine(_projectPublishFolder, fileItem.FileName);
-                using (var fs = new FileStream(filePath, FileMode.Create, FileAccess.Write))
-                {
-                    fs.Write(fileItem.FileBody, 0, fileItem.FileBody.Length);
-                }
+                var saveErr = SaveUploadFile(fileItem, filePath);
+                if (!string.IsNullOrEmpty(saveErr)) return saveErr;
 
 
                 if (!File.Exists(filePath))

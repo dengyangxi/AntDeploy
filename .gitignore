@@ -213,6 +213,9 @@ UpgradeLog*.htm
 # SQL Server files
 *.mdf
 *.ldf
+*.db
+*.db-wal
+*.db-shm
 
 # Business Intelligence projects
 *.rdl.data
@@ -266,3 +269,13 @@ AntDeployAgentWindowsService/agent_publish/
 AntDeploy2019/AntDeployVsix/jib.exe
 AntDeploy/jib.exe
 AntDeploy2022/AntDeployV2/jib.exe
+
+# AntDeployWeb runtime data (workspace repos, encrypted credentials, logs)      
+AntDeployWeb/App_Data/
+antdeploy.json
+
+# AntDeployWeb Agent 自包含发布产物（由 publish-agents.ps1 按需生成，每平台约 70-100MB，不入 Git）
+AntDeployWeb/AgentService/**
+# 保留目录占位，使克隆后目录结构完整（publish 前 Content glob 无匹配亦安全）
+!AntDeployWeb/AgentService/.gitkeep
+/.qoder/repowiki

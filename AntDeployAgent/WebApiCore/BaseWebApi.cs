@@ -5,11 +5,11 @@ using System.Net;
 using System.Text;
 using System.Threading.Tasks;
 using System.Web;
-using AntDeployAgentWindows.Model;
+using AntDeployAgent.Model;
 using Microsoft.Owin;
 using Newtonsoft.Json;
 
-namespace AntDeployAgentWindows.WebApiCore
+namespace AntDeployAgent.WebApiCore
 {
     /// <summary>
     /// Fast WebApi基类
@@ -92,6 +92,8 @@ namespace AntDeployAgentWindows.WebApiCore
             Context = context;
             Response = context.Response;
             Request = context.Request;
+            // 关键修复：长耗时的部署同步操作放在专用线程(LongRunning)执行，
+            // 避免占用线程池线程导致线程池耗尽，从而让 Agent 仍能接收新的上传请求
             return Task.Factory.StartNew(() =>
             {
                 try
@@ -105,7 +107,7 @@ namespace AntDeployAgentWindows.WebApiCore
                     Response.ContentType = "application/json";
                     Response.Write(JsonConvert.SerializeObject(obj));
                 }
-            });
+            }, TaskCreationOptions.LongRunning);
         }
 
         /// <summary>
